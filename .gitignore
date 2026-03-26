@@ -1,0 +1,26 @@
+# ================= Python =================
+__pycache__/
+*.pyc
+*.pyo
+
+venv/
+backend/venv/
+.venv/
+
+# Django
+*.log
+*.sqlite3
+media/
+staticfiles/
+
+# ================= Node / Vue =================
+node_modules/
+dist/
+
+# ================= IDE =================
+.vscode/
+.idea/
+
+# ================= OS =================
+.DS_Store
+Thumbs.db
