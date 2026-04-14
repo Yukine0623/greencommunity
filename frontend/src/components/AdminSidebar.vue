@@ -1,4 +1,4 @@
-<<template>
+<template>
   <aside class="admin-sidebar-wrapper">
     <div class="admin-profile">
       <div class="avatar-container">
@@ -28,7 +28,7 @@
         :class="{ active: currentActive === 'apply' }"
         @click="handleSwitch('apply')"
       >
-        <span class="icon">📝</span> 邻里达人资格审核
+        <span class="icon">📝</span> 邻里达人审核
       </div>
 
       <div 
@@ -36,22 +36,15 @@
         :class="{ active: currentActive === 'posts' }"
         @click="handleSwitch('posts')"
       >
-        <span class="icon">📮</span> 帖子审核
+        <span class="icon">📜</span> 社区帖子审核
       </div>
 
       <div 
-        :class="['nav-item', { active: activeView === 'history' }]" 
-        @click="handleSwitch('history')"
+        class="nav-item" 
+        :class="{ active: currentActive === 'taskAudit' }"
+        @click="handleSwitch('taskAudit')"
       >
-        <span class="icon">📜</span>
-        <span class="text">帖子审核历史</span>
-      </div>
-
-      <div 
-        :class="['nav-item', { active: currentView === 'taskAudit' }]" 
-        @click="currentView = 'taskAudit'"
-      >
-        <span class="icon">⚖️</span> 任务审核
+        <span class="icon">⚖️</span> 社区任务审核
       </div>
 
       <div class="nav-footer">
@@ -74,17 +67,19 @@ const props = defineProps({
 const emit = defineEmits(['switchView'])
 const router = useRouter()
 
-// 记录当前激活的菜单项，用于高亮显示
+// 🚀 核心：统一使用 currentActive 记录当前激活的菜单项
 const currentActive = ref('users')
 
-const handleSwitch = (view) => {
-  currentActive.value = view
-  emit('switchView', view)
-}
 
 const logout = () => {
   localStorage.removeItem('username')
   router.push('/')
+}
+
+const handleSwitch = (view) => {
+  console.log('侧边栏点击了，发送的值是:', view) // 🚀 加这一行
+  currentActive.value = view
+  emit('switchView', view)
 }
 </script>
 
@@ -93,7 +88,7 @@ const logout = () => {
 .admin-sidebar-wrapper {
   width: 260px;
   height: 100vh;
-  background: rgba(6, 31, 26, 0.85); /* 深森林绿半透明 */
+  background: rgba(6, 31, 26, 0.85);
   backdrop-filter: blur(15px);
   -webkit-backdrop-filter: blur(15px);
   border-right: 1px solid rgba(255, 255, 255, 0.05);
@@ -117,7 +112,6 @@ const logout = () => {
 .avatar-circle {
   width: 65px;
   height: 65px;
-  /* 绿色渐变头像 */
   background: linear-gradient(135deg, #10b981 0%, #059669 100%);
   border-radius: 50%;
   margin: 0 auto 15px;
@@ -131,11 +125,11 @@ const logout = () => {
 }
 
 .role-badge {
-  background: rgba(16, 185, 129, 0.2); /* 浅绿透明底 */
+  background: rgba(16, 185, 129, 0.2);
   padding: 3px 12px;
   border-radius: 20px;
   font-size: 11px;
-  color: #6ee7b7; /* 亮绿色文字 */
+  color: #6ee7b7;
   letter-spacing: 1px;
   text-transform: uppercase;
 }
@@ -148,7 +142,7 @@ const logout = () => {
 
 .welcome-text span {
   font-weight: 600;
-  color: #10b981; /* 亮绿色高亮名 */
+  color: #10b981;
 }
 
 /* 导航菜单区 */
@@ -178,6 +172,7 @@ const logout = () => {
   cursor: pointer;
   transition: all 0.25s ease;
   font-size: 15px;
+  border-left: 4px solid transparent; /* 预留边框位，防止抖动 */
 }
 
 .nav-item:hover {
@@ -202,34 +197,26 @@ const logout = () => {
 /* 退出登录 */
 .nav-footer {
   margin-top: auto;
-  padding: 30px 20px; /* 增加左右间距，与菜单对齐 */
-  display: flex;
-  justify-content: center;
-  align-items: center;
+  padding: 30px 20px;
 }
 
 .logout-btn {
-  width: 100%;          /* 撑满父容器 */
-  height: 45px;         /* 固定高度更容易视觉对齐 */
+  width: 100%;
+  height: 45px;
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.1);
   color: #ecfdf5;
   border-radius: 10px;
   cursor: pointer;
   font-weight: 500;
-  
-  /* 🚀 核心对齐逻辑 */
   display: flex;
-  align-items: center;  /* 垂直居中 */
-  justify-content: center; /* 水平居中 */
-  gap: 8px;             /* 图标和文字之间的间距 */
-  
+  align-items: center;
+  justify-content: center;
   transition: all 0.3s;
-  box-sizing: border-box; /* 防止边框撑大按钮 */
 }
 
 .logout-btn:hover {
-  background: rgba(239, 68, 68, 0.1); /* 退出按钮悬浮变淡红 */
+  background: rgba(239, 68, 68, 0.1);
   border-color: rgba(239, 68, 68, 0.4);
   color: #f87171;
 }

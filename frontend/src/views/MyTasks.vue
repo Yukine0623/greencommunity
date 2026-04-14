@@ -148,7 +148,7 @@ const formatCategory = (cat) => {
 }
 
 const formatStatus = (s) => {
-  const map = { pending: '招募中', accepted: '进行中', submitted: '待确认', finished: '已完成' }
+  const map = { auditing: '审核中', pending: '招募中', accepted: '进行中', submitted: '待确认', finished: '已完成' }
   return map[s] || s
 }
 
@@ -179,6 +179,11 @@ onMounted(() => fetchMyTasks())
   padding: 4px 12px;
   border-radius: 20px;
   text-transform: uppercase;
+}
+/* 审核中：使用浅黄色底，深琥珀色字  */
+.status-tag.auditing {
+  background: #fffbeb !important; /* 浅黄色背景 */
+  color: #b45309 !important;      /* 深琥珀色文字 */
 }
 /* 招募中：使用浅红色底，深红色字 (醒目) */
 .status-tag.pending {
@@ -212,7 +217,7 @@ onMounted(() => fetchMyTasks())
 .btn-abandon { background: #fff5f5; color: #e53e3e; border: 1px solid #feb2b2; padding: 8px 18px; border-radius: 8px; cursor: pointer; }
 .btn-detail { background: #f7fafc; color: #4a5568; border: 1px solid #e2e8f0; padding: 8px 18px; border-radius: 8px; }
 
-.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; z-index: 2000; }
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; z-index: 9999; }
 .mini-modal { width: 450px; padding: 35px; }
 .form-item { display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px; }
 .modal-textarea { width: 100%; height: 120px; padding: 12px; border-radius: 12px; border: 1px solid #e2e8f0; resize: none; outline: none; }

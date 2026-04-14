@@ -60,9 +60,7 @@ class Application(models.Model):
 
 # 任务
 # users/models.py
-
 class Task(models.Model):
-    # 任务分类常量
     CATEGORY_CHOICES = [
         ('errand', '跑腿代购'),
         ('repair', '家电维修'),
@@ -70,31 +68,68 @@ class Task(models.Model):
         ('other', '其他互助'),
     ]
 
-    title = models.CharField(max_length=20, verbose_name="任务标题")
+    # 1. 基础信息
+    title = models.CharField(max_length=50, verbose_name="任务标题")  # 长度建议给 50
     category = models.CharField(max_length=20, choices=CATEGORY_CHOICES, default='other')
     content = models.TextField(max_length=1000, verbose_name="任务详情")
 
-    # 关联发布人
+    # 2. 🚀 积分悬赏：发布时扣除/预留多少分
+    reward = models.IntegerField(default=10, verbose_name="悬赏积分")
+
+    # 3. 关联角色
     creator = models.ForeignKey(User, on_delete=models.CASCADE, related_name='created_tasks')
-    # 关联接单人 (可以为空，因为刚发布时没人接)
     worker = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='accepted_tasks')
 
-    # 状态：审核中(auditing)，招募中(pending), 已接单(accepted), 已完成(finished)
+    # 4. 状态机：建议在注释里写全所有状态，方便以后维护
+    # auditing: 待审核
+    # rejected: 审核未通过 (初审拒绝)
+    # pending: 招募中 (审核通过)
+    # accepted: 进行中 (达人已接单)
+    # submitted: 已完成提交 (待用户确认)
+    # intervention: 争议介入 (用户不满意请求仲裁)
+    # finished: 已圆满完成 (归档)
     status = models.CharField(max_length=20, default='auditing')
 
-    # 🚀 新增：用于存放提交时的描述文字
-    result_desc = models.TextField(null=True, blank=True, verbose_name="交付描述")
+    # 5. 流程描述字段
+    result_desc = models.TextField(null=True, blank=True, verbose_name="达人提交成果描述")
+    abandon_reason = models.TextField(null=True, blank=True, verbose_name="放弃/取消原因")
 
-    # 🚀 新增：用于存放放弃任务时的原因
-    abandon_reason = models.TextField(null=True, blank=True, verbose_name="放弃原因")
+    # 6. 🚀 审批与历史记录的核心
+    audit_reason = models.TextField(null=True, blank=True, verbose_name="管理员审核/拒绝理由")
+    intervention_decision = models.TextField(null=True, blank=True, verbose_name="仲裁判定判定依据")
 
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    # 🚀 新增：初审拒绝原因
-    audit_reason = models.TextField(null=True, blank=True, verbose_name="审核评语")
-
-    # 🚀 新增：复审/仲裁判定理由
-    intervention_decision = models.TextField(null=True, blank=True, verbose_name="仲裁理由")
+    # 7. 时间戳
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+    # 🚀 增加这个字段：每次 save() 时自动更新，用于记录“处理时间”
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="最后更新时间")
 
     def __str__(self):
         return self.title
+
+
+from django.db import models
+
+
+class CommunityTask(models.Model):
+    TASK_TYPE = (
+        ('MUTUAL', '邻里互助'),
+        ('PRO', '专业报修'),
+    )
+
+    title = models.CharField(max_length=200)
+    description = models.TextField()
+    task_type = models.CharField(max_length=10, choices=TASK_TYPE)
+
+    # 模糊位置：存储经纬度，但在前端展示时只显示“XX社区”或模糊半径
+    latitude = models.DecimalField(max_digits=9, decimal_places=6)
+    longitude = models.DecimalField(max_digits=9, decimal_places=6)
+
+    budget = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
+    publisher = models.ForeignKey('User', on_delete=models.CASCADE, related_name='published_tasks')
+
+    # 状态控制
+    is_completed = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']

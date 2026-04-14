@@ -3,6 +3,9 @@ from django.views.decorators.csrf import csrf_exempt
 from django.http import JsonResponse
 from .models import User, Post, ExpertApplication, PostHistory,Task
 from django.utils.timezone import now
+from math import radians, cos, sin, asin, sqrt
+from .models import CommunityTask
+
 import json
 
 
@@ -258,7 +261,7 @@ def update_post(request):
 def get_audit_history(request):
     """获取所有已处理（通过/拒绝）的帖子"""
     # 过滤掉 pending 状态，按更新时间排序（最新的处理排前面）
-    posts = Post.objects.filter(status__in=['approved', 'rejected']).order_by('-updated_at')
+    posts = Post.objects.filter(status__in=['approved', 'rejected','finished']).order_by('-updated_at')
 
     data = []
     for p in posts:
@@ -536,22 +539,49 @@ def get_tasks(request):
     return JsonResponse({'code': 200, 'tasks': task_list})
 
 
+# backend/users/views.py
+
+# backend/users/views.py
+
 @csrf_exempt
 def create_task(request):
-    """发布新任务"""
     if request.method == 'POST':
-        data = json.loads(request.body)
-        creator_user = User.objects.get(username=data.get('creator'))
+        try:
+            data = json.loads(request.body)
 
-        Task.objects.create(
-            title=data.get('title'),
-            category=data.get('category'),
-            content=data.get('content'),
-            creator=creator_user,
-            status='pending'
-        )
-        return JsonResponse({'code': 200, 'message': '发布成功'})
+            # 1. 🚀 修复 500 报错的关键：从 localStorage/前端传来的 username 找人
+            # 不要相信 user_id，因为前端可能没存 ID，只存了用户名
+            username = data.get('username')
+            if not username:
+                return JsonResponse({'code': 400, 'message': '未检测到登录状态，请重新登录'})
 
+            # 2. 找到对应的用户对象
+            try:
+                user = User.objects.get(username=username)
+            except User.DoesNotExist:
+                return JsonResponse({'code': 404, 'message': '发布人账号异常'})
+
+            # 3. 🚀 修复跳过审核的关键：在这里强制设为 'auditing'
+            new_task = Task.objects.create(
+                title=data.get('title'),
+                content=data.get('content'),
+                category=data.get('category'),
+                reward=int(data.get('reward', 10)),  # 确保是数字
+                creator=user,  # 直接关联用户对象
+                status='auditing'  # 🔒 锁死状态！哪怕前端传 pending，这里也存 auditing
+            )
+
+            return JsonResponse({
+                'code': 200,
+                'message': '提交成功！任务已进入待审核队列，通过后将发布到市场。'
+            })
+
+        except Exception as e:
+            # 这里的 print 会出现在你的 PyCharm/黑窗口里，方便你看具体错哪了
+            print(f"创建任务时发生错误: {str(e)}")
+            return JsonResponse({'code': 500, 'message': f'服务器内部错误: {str(e)}'})
+
+    return JsonResponse({'code': 405, 'message': '只支持POST请求'})
 
 @csrf_exempt
 def accept_task(request):
@@ -720,6 +750,63 @@ def admin_handle_review(request):
 
         except Task.DoesNotExist:
             return JsonResponse({'code': 404, 'message': '找不到该任务'})
+
+
+@csrf_exempt
+def get_admin_all_tasks(request):
+    """管理员获取所有参与过审核或仲裁的任务"""
+    # 排除掉还在“招募中”或“进行中”且未发生争议的任务，只看跟管理员有关的
+    tasks = Task.objects.exclude(status='accepted').order_by('-created_at')
+
+    data = []
+    for t in tasks:
+        data.append({
+            'id': t.id,
+            'title': t.title,
+            'content': t.content,
+            'status': t.status,  # 原始状态
+            'creator': t.creator.username,
+            'category': t.category,
+            'audit_reason': t.audit_reason,  # 初审理由
+            'intervention_decision': t.intervention_decision,  # 复审理由
+            'created_at': t.created_at.strftime('%Y-%m-%d %H:%M')
+        })
+    return JsonResponse({'code': 200, 'tasks': data})
+
+from math import radians, cos, sin, asin, sqrt
+
+def haversine_distance(lat1, lon1, lat2, lon2):
+    """
+    计算两个经纬度之间的地球表面距离（单位：公里）
+    """
+    # 将十进制度数转化为弧度
+    lon1, lat1, lon2, lat2 = map(radians, [float(lon1), float(lat1), float(lon2), float(lat2)])
+
+    # Haversine 公式
+    dlon = lon2 - lon1
+    dlat = lat2 - lat1
+    a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
+    c = 2 * asin(sqrt(a))
+    r = 6371 # 地球平均半径，单位为公里
+    return c * r
+
+
+
+def get_nearby_tasks(user_lat, user_lng, radius=3):
+    """
+    获取指定半径（公里）内的任务
+    """
+    # 这是一个基础的过滤逻辑，实际高性能场景建议使用 PostGIS
+    all_tasks = CommunityTask.objects.filter(is_completed=False)
+    nearby_tasks = []
+
+    for task in all_tasks:
+        # 计算距离 (单位: km)
+        dist = haversine_distance(user_lat, user_lng, task.latitude, task.longitude)
+        if dist <= radius:
+            nearby_tasks.append(task)
+    return nearby_tasks
+
 
 print("views loaded")
 

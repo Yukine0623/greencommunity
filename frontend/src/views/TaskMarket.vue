@@ -132,20 +132,35 @@ const fetchTasks = async () => {
 }
 
 const submitTask = async () => {
-  if (!newTask.value.title || !newTask.value.content) return alert('请完善任务内容')
-  try {
-    await axios.post('http://127.0.0.1:8000/api/create_task/', {
-      ...newTask.value,
-      creator: username.value
-    })
-    alert('任务发布成功！')
-    showModal.value = false
-    newTask.value = { title: '', category: 'errand', content: '' }
-    fetchTasks()
-  } catch (err) {
-    alert('发布失败，请检查网络')
+  // 1. 基础校验
+  if (!newTask.value.title || !newTask.value.content) {
+    return alert('请完善任务标题和详情内容');
   }
-}
+
+  try {
+    // 🚀 核心修复：必须把字段名改为 'username'，以匹配后端的 data.get('username')
+    await axios.post('http://127.0.0.1:8000/api/create_task/', {
+      title: newTask.value.title,
+      content: newTask.value.content,
+      category: newTask.value.category,
+      reward: newTask.value.reward || 10,
+      username: username.value  // 👈 重点：这里的 Key 必须叫 username
+    });
+
+    alert('提交成功！任务已进入后台审核队列。');
+    
+    // 2. 关闭弹窗并重置表单
+    showModal.value = false;
+    newTask.value = { title: '', category: 'errand', content: '', reward: 10 };
+    
+    // 3. 刷新列表（此时新任务在审核中，大厅列表依然不显示它是正常的）
+    fetchTasks(); 
+    
+  } catch (err) {
+    console.error('发布失败详情:', err);
+    alert('发布失败，请检查登录状态或后端连接');
+  }
+};
 
 const handleAccept = async (id) => {
   if (!confirm('确认要接受该任务吗？')) return

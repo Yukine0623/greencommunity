@@ -3,7 +3,7 @@ from django.urls import path
 from users.views import login, register, user_list, get_posts, create_post, update_post, apply_expert, \
     get_my_application, approve_expert, reject_expert, application_list, get_user_info, my_application_history, \
     all_pending_posts, review_post, get_post_history, get_audit_history, get_tasks, create_task, accept_task, \
-    get_my_tasks, submit_task, abandon_task, finish_task, get_audit_tasks, admin_handle_review
+    get_my_tasks, submit_task, abandon_task, finish_task, get_audit_tasks, admin_handle_review, get_admin_all_tasks
 
 urlpatterns = [
     path('login/', login),  #登录
@@ -30,4 +30,5 @@ urlpatterns = [
     path('finish_task/',finish_task),
     path('get_audit_tasks/', get_audit_tasks),
     path('admin_handle_review/', admin_handle_review),
+    path('get_admin_all_tasks/', get_admin_all_tasks),
 ]
