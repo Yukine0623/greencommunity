@@ -16,6 +16,48 @@ import json
 
 AUTO_ACCEPT_MINUTES = 5
 
+TERMINATION_SETTLEMENT_STATUSES = {'finished', 'terminated'}
+
+
+def can_user_manage_task(user, task):
+    return task.creator_id == user.id and task.status in {'auditing', 'pending', 'rejected'}
+
+
+def can_user_request_termination(username, task):
+    if task.status != 'accepted':
+        return False
+    if task.creator.username == username:
+        return True
+    return bool(task.worker and task.worker.username == username)
+
+
+def normalize_user_role_flags(user):
+    """
+    兼容历史单角色数据：
+    - role=expert/provider => 转为 resident + 资格标记
+    - role=user => resident
+    """
+    changed_fields = []
+    role = user.role
+    if role == 'expert':
+        if not user.is_expert:
+            user.is_expert = True
+            changed_fields.append('is_expert')
+        user.role = 'resident'
+        changed_fields.append('role')
+    elif role == 'provider':
+        if not user.is_provider:
+            user.is_provider = True
+            changed_fields.append('is_provider')
+        user.role = 'resident'
+        changed_fields.append('role')
+    elif role == 'user':
+        user.role = 'resident'
+        changed_fields.append('role')
+
+    if changed_fields:
+        user.save(update_fields=list(dict.fromkeys(changed_fields)))
+
 
 def auto_finish_overdue_submitted_tasks():
     """自动验收：submitted 超过 5 分钟未处理则自动完成并发放积分。"""
@@ -68,6 +110,7 @@ def login(request):
 
     try:
         user = User.objects.get(username=username)
+        normalize_user_role_flags(user)
 
         if user.password != password:
             return JsonResponse({'code': 401, 'message': '密码错误'})
@@ -77,7 +120,9 @@ def login(request):
             'code': 200,
             'message': '登录成功',
             'role': user.role,   # 返回用户身份
-            'points': user.points # 返回当前用户积分
+            'points': user.points, # 返回当前用户积分
+            'is_expert': user.is_expert,
+            'is_provider': user.is_provider
         })
 
     except User.DoesNotExist:
@@ -101,7 +146,8 @@ def register(request):
         # 创建用户
         User.objects.create(
             username=username,
-            password=password
+            password=password,
+            role='resident'
         )
 
         return JsonResponse({
@@ -116,17 +162,19 @@ def register(request):
 def user_list(request):
     if request.method == 'GET':
         users = User.objects.all()
-        user_data = [
-            {
+        user_data = []
+        for user in users:
+            normalize_user_role_flags(user)
+            user_data.append({
                 'id': user.id,
                 'username': user.username,
                 'role': user.role,
+                'is_expert': user.is_expert,
+                'is_provider': user.is_provider,
                 'phone': user.phone,
                 'points': user.points,
                 'created_at': user.created_at.strftime('%Y-%m-%d %H:%M:%S')
-            }
-            for user in users
-        ]
+            })
         return JsonResponse({'code': 200, 'users': user_data})
 
     return JsonResponse({'code': 405, 'message': '只支持GET'})
@@ -342,6 +390,9 @@ def send_chat_message(request):
     if not task.worker:
         return JsonResponse({'code': 400, 'message': '任务尚未接单，暂不能聊天'})
 
+    if task.status in TERMINATION_SETTLEMENT_STATUSES:
+        return JsonResponse({'code': 400, 'message': '任务已结束，聊天已关闭'})
+
     msg = ChatMessage.objects.create(
         task=task,
         sender=username,
@@ -514,33 +565,39 @@ def apply_expert(request):
             })
 
         username = data.get('username')
-        reason = data.get('reason')
+        reason = (data.get('reason') or '').strip()
+        apply_type = (data.get('apply_type') or 'expert').strip()
+        service_scope = (data.get('service_scope') or '').strip()
+        pricing_note = (data.get('pricing_note') or '').strip()
 
         # 参数校验
+        if apply_type not in {'expert', 'provider'}:
+            return JsonResponse({'code': 400, 'message': '申请类型不正确'})
         if not username or not reason:
             return JsonResponse({
                 'code': 400,
                 'message': '参数不完整'
             })
+        if apply_type == 'provider' and not service_scope:
+            return JsonResponse({'code': 400, 'message': '认证服务者请填写服务范围'})
 
         # 用户是否存在
         try:
             user = User.objects.get(username=username)
+            normalize_user_role_flags(user)
         except User.DoesNotExist:
             return JsonResponse({
                 'code': 400,
                 'message': '用户不存在'
             })
 
-        # 是否已经是达人
-        if user.role == '达人':
-            return JsonResponse({
-                'code': 400,
-                'message': '你已经是邻里达人，无需申请'
-            })
+        has_qualification = user.is_expert if apply_type == 'expert' else user.is_provider
+        if has_qualification:
+            role_name = '邻里达人' if apply_type == 'expert' else '认证服务者'
+            return JsonResponse({'code': 400, 'message': f'你已经是{role_name}，无需重复申请'})
 
         # 是否已有未处理申请
-        if ExpertApplication.objects.filter(username=username, status='pending').exists():
+        if ExpertApplication.objects.filter(username=username, apply_type=apply_type, status='pending').exists():
             return JsonResponse({
                 'code': 400,
                 'message': '你已经提交过申请，请等待审核'
@@ -549,7 +606,10 @@ def apply_expert(request):
         # 创建申请
         ExpertApplication.objects.create(
             username=username,
+            apply_type=apply_type,
             reason=reason,
+            service_scope=service_scope or None,
+            pricing_note=pricing_note or None,
             status='pending'   # 明确写一下（更规范）
         )
 
@@ -572,9 +632,13 @@ def get_my_application(request):
     try:
         data = json.loads(request.body)
         username = data.get('username')
+        apply_type = (data.get('apply_type') or 'expert').strip()
+        if apply_type not in {'expert', 'provider'}:
+            return JsonResponse({'code': 400, 'message': '申请类型不正确'})
 
         app = ExpertApplication.objects.filter(
-            username=username
+            username=username,
+            apply_type=apply_type
         ).order_by('-created_at').first()   #-created_at按时间倒序   .first取最新一条
 
         if not app:
@@ -585,8 +649,11 @@ def get_my_application(request):
 
         return JsonResponse({
             'code': 200,
+            'apply_type': apply_type,
             'status': app.status,
-            'reason': app.reason
+            'reason': app.reason,
+            'service_scope': app.service_scope,
+            'pricing_note': app.pricing_note
         })
 
     except Exception as e:
@@ -602,16 +669,20 @@ def approve_expert(request):
 
     try:
         data = json.loads(request.body)
+        app_id = data.get('id')
         username = data.get('username')
-
-        if not username:
-            return JsonResponse({'code': 400, 'message': '缺少用户名'})
+        apply_type = (data.get('apply_type') or '').strip()
 
         # 找到待审核申请
-        app = ExpertApplication.objects.filter(
-            username=username,
-            status='pending'
-        ).first()
+        if app_id:
+            app = ExpertApplication.objects.filter(id=app_id, status='pending').first()
+        else:
+            if not username:
+                return JsonResponse({'code': 400, 'message': '缺少用户名'})
+            filters = {'username': username, 'status': 'pending'}
+            if apply_type in {'expert', 'provider'}:
+                filters['apply_type'] = apply_type
+            app = ExpertApplication.objects.filter(**filters).order_by('-created_at').first()
 
         if not app:
             return JsonResponse({'code': 404, 'message': '申请不存在或已处理'})
@@ -622,10 +693,15 @@ def approve_expert(request):
         app.save()
 
         # ✅ 同时把用户角色改成 expert
-        user = User.objects.filter(username=username).first()
+        user = User.objects.filter(username=app.username).first()
         if user:
-            user.role = 'expert'
-            user.save()
+            normalize_user_role_flags(user)
+            if app.apply_type == 'expert':
+                user.is_expert = True
+                user.save(update_fields=['is_expert'])
+            else:
+                user.is_provider = True
+                user.save(update_fields=['is_provider'])
 
         return JsonResponse({'code': 200, 'message': '审核通过'})
 
@@ -641,17 +717,21 @@ def reject_expert(request):
 
     try:
         data = json.loads(request.body)
+        app_id = data.get('id')
         username = data.get('username')
+        apply_type = (data.get('apply_type') or '').strip()
         reason = data.get('reason')
 
-        if not username:
-            return JsonResponse({'code': 400, 'message': '缺少用户名'})
-
         # 找到待审核申请
-        app = ExpertApplication.objects.filter(
-            username=username,
-            status='pending'
-        ).first()
+        if app_id:
+            app = ExpertApplication.objects.filter(id=app_id, status='pending').first()
+        else:
+            if not username:
+                return JsonResponse({'code': 400, 'message': '缺少用户名'})
+            filters = {'username': username, 'status': 'pending'}
+            if apply_type in {'expert', 'provider'}:
+                filters['apply_type'] = apply_type
+            app = ExpertApplication.objects.filter(**filters).order_by('-created_at').first()
 
         if not app:
             return JsonResponse({'code': 404, 'message': '申请不存在或已处理'})
@@ -681,7 +761,10 @@ def application_list(request):
         result.append({
             'id': item.id,
             'username': item.username,
+            'apply_type': item.apply_type,
             'reason': item.reason,
+            'service_scope': item.service_scope,
+            'pricing_note': item.pricing_note,
             'status': item.status,
             'created_at': item.created_at.strftime('%Y-%m-%d %H:%M:%S')
         })
@@ -705,12 +788,15 @@ def get_user_info(request):
 
         if not user:
             return JsonResponse({'code': 404, 'message': '用户不存在'})
+        normalize_user_role_flags(user)
 
         return JsonResponse({
             'code': 200,
             'username': user.username,
             'role': user.role,
-            'points': user.points
+            'points': user.points,
+            'is_expert': user.is_expert,
+            'is_provider': user.is_provider
         })
 
     except Exception as e:
@@ -725,16 +811,22 @@ def my_application_history(request):
 
     data = json.loads(request.body)
     username = data.get('username')
+    apply_type = (data.get('apply_type') or '').strip()
 
-    apps = ExpertApplication.objects.filter(
-        username=username
-    ).order_by('-created_at')
+    filters = {'username': username}
+    if apply_type in {'expert', 'provider'}:
+        filters['apply_type'] = apply_type
+    apps = ExpertApplication.objects.filter(**filters).order_by('-created_at')
 
     result = []
     for item in apps:
         result.append({
             'id': item.id,
+            'apply_type': item.apply_type,
             'status': item.status,
+            'reason': item.reason,
+            'service_scope': item.service_scope,
+            'pricing_note': item.pricing_note,
             'created_at': item.created_at.strftime('%Y-%m-%d %H:%M:%S'),
             'reviewed_at': item.reviewed_at.strftime('%Y-%m-%d %H:%M:%S') if item.reviewed_at else None,
             'reject_reason': item.reject_reason
@@ -877,7 +969,19 @@ def accept_task(request):
         task.status = 'accepted'
         task.accepted_at = now()
         task.submitted_at = None
-        task.save(update_fields=['worker', 'status', 'accepted_at', 'submitted_at', 'updated_at'])
+        task.terminate_requested_by = None
+        task.terminate_reason = None
+        task.terminate_agreed_by = None
+        task.terminate_reject_reason = None
+        task.terminate_creator_points = None
+        task.terminate_worker_points = None
+        task.terminated_at = None
+        task.save(update_fields=[
+            'worker', 'status', 'accepted_at', 'submitted_at',
+            'terminate_requested_by', 'terminate_reason', 'terminate_agreed_by',
+            'terminate_reject_reason', 'terminate_creator_points', 'terminate_worker_points',
+            'terminated_at', 'updated_at'
+        ])
         return JsonResponse({'code': 200, 'message': '接单成功！'})
 
 
@@ -906,10 +1010,20 @@ def get_my_tasks(request):
             'content': t.content,
             'category': t.category,
             'reward_points': t.reward_points,
+            'community_zone': t.community_zone,
+            'latitude': float(t.latitude) if t.latitude is not None else None,
+            'longitude': float(t.longitude) if t.longitude is not None else None,
             'result_desc': t.result_desc,
             'abandon_reason': t.abandon_reason,
+            'terminate_requested_by': t.terminate_requested_by,
+            'terminate_reason': t.terminate_reason,
+            'terminate_agreed_by': t.terminate_agreed_by,
+            'terminate_reject_reason': t.terminate_reject_reason,
+            'terminate_creator_points': t.terminate_creator_points,
+            'terminate_worker_points': t.terminate_worker_points,
             'accepted_at': t.accepted_at.strftime('%Y-%m-%d %H:%M:%S') if t.accepted_at else None,
             'submitted_at': t.submitted_at.strftime('%Y-%m-%d %H:%M:%S') if t.submitted_at else None,
+            'terminated_at': t.terminated_at.strftime('%Y-%m-%d %H:%M:%S') if t.terminated_at else None,
             'auto_accept_deadline': (t.submitted_at + auto_cutoff).strftime('%Y-%m-%d %H:%M:%S')
             if t.status == 'submitted' and t.submitted_at else None,
             'created_at': t.created_at.strftime('%Y-%m-%d %H:%M')
@@ -953,8 +1067,20 @@ def abandon_task(request):
             task.status = 'pending'
             task.accepted_at = None
             task.submitted_at = None
+            task.terminate_requested_by = None
+            task.terminate_reason = None
+            task.terminate_agreed_by = None
+            task.terminate_reject_reason = None
+            task.terminate_creator_points = None
+            task.terminate_worker_points = None
+            task.terminated_at = None
 
-            task.save(update_fields=['abandon_reason', 'worker', 'status', 'accepted_at', 'submitted_at', 'updated_at'])
+            task.save(update_fields=[
+                'abandon_reason', 'worker', 'status', 'accepted_at', 'submitted_at',
+                'terminate_requested_by', 'terminate_reason', 'terminate_agreed_by',
+                'terminate_reject_reason', 'terminate_creator_points', 'terminate_worker_points',
+                'terminated_at', 'updated_at'
+            ])
             return JsonResponse({'code': 200, 'message': '已放弃任务，任务已重回市场'})
         except Task.DoesNotExist:
             return JsonResponse({'code': 404, 'message': '任务不存在'})
@@ -1007,6 +1133,219 @@ def finish_task(request):
             return JsonResponse({'code': 404, 'message': '任务不存在'})
 
 
+@csrf_exempt
+def update_task(request):
+    if request.method != 'POST':
+        return JsonResponse({'code': 405, 'message': '只支持POST'})
+
+    try:
+        data = json.loads(request.body)
+        username = (data.get('username') or '').strip()
+        task_id = data.get('task_id')
+        title = (data.get('title') or '').strip()
+        content = (data.get('content') or '').strip()
+        category = (data.get('category') or '').strip()
+        reward_points = int(data.get('reward_points', 0))
+    except Exception:
+        return JsonResponse({'code': 400, 'message': '请求参数错误'})
+
+    if not username or not task_id:
+        return JsonResponse({'code': 400, 'message': '缺少必要参数'})
+    if not title or not content:
+        return JsonResponse({'code': 400, 'message': '任务标题和内容不能为空'})
+    if reward_points <= 0:
+        return JsonResponse({'code': 400, 'message': '积分必须大于 0'})
+
+    user = User.objects.filter(username=username).first()
+    if not user:
+        return JsonResponse({'code': 404, 'message': '用户不存在'})
+
+    task = Task.objects.filter(id=task_id).select_related('creator').first()
+    if not task:
+        return JsonResponse({'code': 404, 'message': '任务不存在'})
+
+    if not can_user_manage_task(user, task):
+        return JsonResponse({'code': 403, 'message': '当前任务状态不允许修改'})
+
+    points_diff = reward_points - task.reward_points
+    if points_diff > 0 and user.points < points_diff:
+        return JsonResponse({'code': 400, 'message': '积分不足，无法提高悬赏积分'})
+
+    with transaction.atomic():
+        if points_diff != 0:
+            user.points = F('points') - points_diff
+            user.save(update_fields=['points'])
+            user.refresh_from_db(fields=['points'])
+            PointTransaction.objects.create(
+                user=user,
+                change=-points_diff,
+                reason=f'修改任务悬赏积分：{task.title}'
+            )
+
+        if 'community_zone' in data:
+            community_zone = (data.get('community_zone') or '').strip() or None
+        else:
+            community_zone = task.community_zone
+
+        latitude = data.get('latitude') if 'latitude' in data else task.latitude
+        longitude = data.get('longitude') if 'longitude' in data else task.longitude
+
+        task.title = title
+        task.content = content
+        task.category = category or task.category
+        task.reward_points = reward_points
+        task.community_zone = community_zone
+        task.latitude = latitude if latitude not in ['', None] else None
+        task.longitude = longitude if longitude not in ['', None] else None
+        task.status = 'auditing'
+        task.audit_reason = '任务已修改，等待重新审核'
+        task.save(update_fields=[
+            'title', 'content', 'category', 'reward_points', 'community_zone',
+            'latitude', 'longitude', 'status', 'audit_reason', 'updated_at'
+        ])
+
+    return JsonResponse({
+        'code': 200,
+        'message': '任务已修改并下架，需管理员审核后重新发布',
+        'points': user.points
+    })
+
+
+@csrf_exempt
+def delete_task(request):
+    if request.method != 'POST':
+        return JsonResponse({'code': 405, 'message': '只支持POST'})
+
+    try:
+        data = json.loads(request.body)
+        username = (data.get('username') or '').strip()
+        task_id = data.get('task_id')
+    except Exception:
+        return JsonResponse({'code': 400, 'message': '请求参数错误'})
+
+    if not username or not task_id:
+        return JsonResponse({'code': 400, 'message': '缺少必要参数'})
+
+    user = User.objects.filter(username=username).first()
+    if not user:
+        return JsonResponse({'code': 404, 'message': '用户不存在'})
+
+    task = Task.objects.filter(id=task_id).select_related('creator').first()
+    if not task:
+        return JsonResponse({'code': 404, 'message': '任务不存在'})
+
+    if task.creator_id != user.id:
+        return JsonResponse({'code': 403, 'message': '只有发布者可以删除任务'})
+    if task.status in {'accepted', 'submitted', 'intervention', 'terminating_pending_peer', 'terminating_admin_review'}:
+        return JsonResponse({'code': 400, 'message': '该任务正在执行或审核中，暂不可删除'})
+
+    with transaction.atomic():
+        if task.status in {'auditing', 'pending', 'rejected'}:
+            user.points = F('points') + task.reward_points
+            user.save(update_fields=['points'])
+            PointTransaction.objects.create(
+                user=user,
+                change=task.reward_points,
+                reason=f'删除任务退回冻结积分：{task.title}'
+            )
+        task.delete()
+
+    return JsonResponse({'code': 200, 'message': '任务已删除'})
+
+
+@csrf_exempt
+def request_terminate_task(request):
+    if request.method != 'POST':
+        return JsonResponse({'code': 405, 'message': '只支持POST'})
+
+    try:
+        data = json.loads(request.body)
+        username = (data.get('username') or '').strip()
+        task_id = data.get('task_id')
+        reason = (data.get('reason') or '').strip()
+    except Exception:
+        return JsonResponse({'code': 400, 'message': '请求参数错误'})
+
+    if not username or not task_id:
+        return JsonResponse({'code': 400, 'message': '缺少必要参数'})
+    if not reason:
+        return JsonResponse({'code': 400, 'message': '请填写终止原因'})
+
+    with transaction.atomic():
+        task = Task.objects.select_for_update().filter(id=task_id).select_related('creator', 'worker').first()
+        if not task:
+            return JsonResponse({'code': 404, 'message': '任务不存在'})
+
+        if not can_user_request_termination(username, task):
+            return JsonResponse({'code': 403, 'message': '当前状态不允许发起终止'})
+
+        task.status = 'terminating_pending_peer'
+        task.terminate_requested_by = username
+        task.terminate_reason = reason
+        task.terminate_agreed_by = None
+        task.terminate_reject_reason = None
+        task.terminate_creator_points = None
+        task.terminate_worker_points = None
+        task.terminated_at = None
+        task.save(update_fields=[
+            'status', 'terminate_requested_by', 'terminate_reason', 'terminate_agreed_by',
+            'terminate_reject_reason', 'terminate_creator_points', 'terminate_worker_points',
+            'terminated_at', 'updated_at'
+        ])
+
+    return JsonResponse({'code': 200, 'message': '已发起终止申请，等待对方同意'})
+
+
+@csrf_exempt
+def respond_terminate_task(request):
+    if request.method != 'POST':
+        return JsonResponse({'code': 405, 'message': '只支持POST'})
+
+    try:
+        data = json.loads(request.body)
+        username = (data.get('username') or '').strip()
+        task_id = data.get('task_id')
+        agree = bool(data.get('agree'))
+        reason = (data.get('reason') or '').strip()
+    except Exception:
+        return JsonResponse({'code': 400, 'message': '请求参数错误'})
+
+    if not username or not task_id:
+        return JsonResponse({'code': 400, 'message': '缺少必要参数'})
+
+    with transaction.atomic():
+        task = Task.objects.select_for_update().filter(id=task_id).select_related('creator', 'worker').first()
+        if not task:
+            return JsonResponse({'code': 404, 'message': '任务不存在'})
+        if task.status != 'terminating_pending_peer':
+            return JsonResponse({'code': 400, 'message': '当前任务不在待对方确认终止状态'})
+
+        if not task.worker:
+            return JsonResponse({'code': 400, 'message': '任务暂无接单方，无法执行终止流程'})
+
+        requester = task.terminate_requested_by
+        if requester not in {task.creator.username, task.worker.username}:
+            return JsonResponse({'code': 400, 'message': '终止申请记录异常'})
+        if username == requester:
+            return JsonResponse({'code': 403, 'message': '发起人不能重复确认，请等待对方处理'})
+
+        if username not in {task.creator.username, task.worker.username}:
+            return JsonResponse({'code': 403, 'message': '你没有该任务终止操作权限'})
+
+        if agree:
+            task.status = 'terminating_admin_review'
+            task.terminate_agreed_by = username
+            task.terminate_reject_reason = None
+            task.save(update_fields=['status', 'terminate_agreed_by', 'terminate_reject_reason', 'updated_at'])
+            return JsonResponse({'code': 200, 'message': '已同意终止，等待管理员审核'})
+
+        task.status = 'accepted'
+        task.terminate_agreed_by = None
+        task.terminate_reject_reason = reason or '对方拒绝终止'
+        task.save(update_fields=['status', 'terminate_agreed_by', 'terminate_reject_reason', 'updated_at'])
+        return JsonResponse({'code': 200, 'message': '你已拒绝终止申请，任务恢复进行中'})
+
+
 # users/views.py
 import json
 from django.http import JsonResponse
@@ -1016,23 +1355,31 @@ from .models import Task, User
 
 @csrf_exempt
 def get_audit_tasks(request):
-    """管理员专用：获取待初审(auditing)和待复审(intervention)的任务"""
+    """管理员专用：获取待初审、待复审、待终止审核的任务"""
     auto_finish_overdue_submitted_tasks()
 
-    # 只要是需要管理员操心的，全查出来
-    tasks = Task.objects.filter(status__in=['auditing', 'intervention']).order_by('-created_at')
+    tasks = Task.objects.filter(
+        status__in=['auditing', 'intervention', 'terminating_admin_review']
+    ).order_by('-created_at')
 
     data = []
     for t in tasks:
         data.append({
             'id': t.id,
             'title': t.title,
+            'category': t.category,
             'content': t.content,
             'status': t.status,
             'creator': t.creator.username,
             'worker': t.worker.username if t.worker else "暂无",
             'result_desc': t.result_desc,  # 达人提交的成果描述
             'reward_points': t.reward_points,
+            'terminate_requested_by': t.terminate_requested_by,
+            'terminate_reason': t.terminate_reason,
+            'terminate_agreed_by': t.terminate_agreed_by,
+            'terminate_reject_reason': t.terminate_reject_reason,
+            'terminate_creator_points': t.terminate_creator_points,
+            'terminate_worker_points': t.terminate_worker_points,
             'created_at': t.created_at.strftime('%Y-%m-%d %H:%M')
         })
     return JsonResponse({'code': 200, 'tasks': data})
@@ -1080,38 +1427,85 @@ def admin_handle_review(request):
         task_id = data.get('taskId')
         action = data.get('action')  # 'approve' 或 'reject'
         reason = data.get('reason')  # 理由/评语
+        creator_points = data.get('creator_points')
+        worker_points = data.get('worker_points')
 
         try:
-            task = Task.objects.get(id=task_id)
+            with transaction.atomic():
+                task = Task.objects.select_for_update().select_related('creator', 'worker').get(id=task_id)
 
-            # --- 情况 A：初审阶段 (auditing) ---
-            if task.status == 'auditing':
-                if action == 'approve':
-                    task.status = 'pending'  # 审核通过，进入市场
-                    task.audit_reason = "审核通过"
+                # --- 情况 A：初审阶段 (auditing) ---
+                if task.status == 'auditing':
+                    if action == 'approve':
+                        task.status = 'pending'  # 审核通过，进入市场
+                        task.audit_reason = "审核通过"
+                    else:
+                        if not reason:
+                            return JsonResponse({'code': 400, 'message': '拒绝发布必须填写原因'})
+                        task.status = 'rejected'  # 拒绝发布
+                        task.audit_reason = reason
+
+                # --- 情况 B：复审/仲裁阶段 (intervention) ---
+                elif task.status == 'intervention':
+                    if not reason:
+                        return JsonResponse({'code': 400, 'message': '仲裁必须填写判定理由'})
+
+                    task.intervention_decision = reason
+                    if action == 'approve':
+                        task.status = 'finished'
+                    else:
+                        task.status = 'pending'
+                        task.worker = None
+                        task.accepted_at = None
+                        task.submitted_at = None
+
+                # --- 情况 C：终止任务审核阶段 (terminating_admin_review) ---
+                elif task.status == 'terminating_admin_review':
+                    if action == 'approve':
+                        if not task.worker:
+                            return JsonResponse({'code': 400, 'message': '任务接单方缺失，无法终止结算'})
+                        try:
+                            creator_points_val = int(creator_points)
+                            worker_points_val = int(worker_points)
+                        except (TypeError, ValueError):
+                            return JsonResponse({'code': 400, 'message': '请填写有效的积分分配数值'})
+
+                        if creator_points_val < 0 or worker_points_val < 0:
+                            return JsonResponse({'code': 400, 'message': '积分分配不能为负数'})
+                        if creator_points_val + worker_points_val != task.reward_points:
+                            return JsonResponse({'code': 400, 'message': f'积分总和必须等于悬赏积分 {task.reward_points}'})
+
+                        if creator_points_val > 0:
+                            task.creator.points = F('points') + creator_points_val
+                            task.creator.save(update_fields=['points'])
+                            PointTransaction.objects.create(
+                                user=task.creator,
+                                change=creator_points_val,
+                                reason=f'任务终止返还积分：{task.title}'
+                            )
+                        if worker_points_val > 0:
+                            task.worker.points = F('points') + worker_points_val
+                            task.worker.save(update_fields=['points'])
+                            PointTransaction.objects.create(
+                                user=task.worker,
+                                change=worker_points_val,
+                                reason=f'任务终止结算积分：{task.title}'
+                            )
+
+                        task.status = 'terminated'
+                        task.terminate_creator_points = creator_points_val
+                        task.terminate_worker_points = worker_points_val
+                        task.terminated_at = now()
+                        task.terminate_reject_reason = None
+                    else:
+                        if not reason:
+                            return JsonResponse({'code': 400, 'message': '驳回终止需填写原因'})
+                        task.status = 'accepted'
+                        task.terminate_reject_reason = reason
                 else:
-                    if not reason: return JsonResponse({'code': 400, 'message': '拒绝发布必须填写原因'})
-                    task.status = 'rejected'  # 拒绝发布
-                    task.audit_reason = reason
+                    return JsonResponse({'code': 400, 'message': '当前任务状态不支持该审核操作'})
 
-            # --- 情况 B：复审/仲裁阶段 (intervention) ---
-            elif task.status == 'intervention':
-                if not reason: return JsonResponse({'code': 400, 'message': '仲裁必须填写判定理由'})
-
-                task.intervention_decision = reason
-                if action == 'approve':
-                    # 判定达人胜诉：强制结项，结算积分
-                    task.status = 'finished'
-                    # 这里可以顺手写积分逻辑：
-                    # task.worker.points += 10; task.worker.save()
-                else:
-                    # 判定用户胜诉：任务回退到招募中，或直接撤销
-                    task.status = 'pending'
-                    task.worker = None  # 踢掉当前的接单达人
-                    task.accepted_at = None
-                    task.submitted_at = None
-
-            task.save()
+                task.save()
             return JsonResponse({'code': 200, 'message': '审批操作已记录'})
 
         except Task.DoesNotExist:

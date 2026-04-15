@@ -8,14 +8,9 @@
           <h1>{{ viewTitle }}</h1>
           <p class="subtitle">工作愉快，{{ adminName }}。当前系统运行正常。</p>
         </div>
-        <div class="header-right">
-          <button class="btn-refresh" @click="refreshData">
-            <span class="icon">🔄</span> 刷新实时数据
-          </button>
-        </div>
       </header>
 
-      <div class="glass-card filter-bar">
+      <div v-if="!['applyExpert', 'applyProvider', 'taskAudit'].includes(currentView)" class="glass-card filter-bar">
         <div class="search-input">
           <span class="icon">🔍</span>
           <input v-model="searchName" :placeholder="searchPlaceholder" />
@@ -24,15 +19,18 @@
         <div class="filter-group">
           <select v-if="currentView === 'users'" v-model="filterRole" class="custom-select">
             <option value="">所有角色</option>
-            <option value="user">普通用户</option>
+            <option value="resident">普通用户</option>
+            <option value="user">普通用户（兼容旧数据）</option>
             <option value="expert">邻里达人</option>
+            <option value="provider">认证服务者</option>
             <option value="admin">管理员</option>
           </select>
 
           <select v-if="currentView === 'postManage'" v-model="processStatusFilter" class="custom-select">
-            <option value="all">🌐 全部状态</option>
-            <option value="todo">⏳ 待处理</option>
-            <option value="done">✅ 已归档</option>
+            <option value="all">全部</option>
+            <option value="pending">待处理</option>
+            <option value="approved">已通过</option>
+            <option value="rejected">已拒绝</option>
           </select>
         </div>
       </div>
@@ -49,7 +47,7 @@
                 <tr v-for="user in paginatedUsers" :key="user.id">
                   <td class="id-col">#{{ user.id }}</td>
                   <td class="name-col">{{ user.username }}</td>
-                  <td><span :class="['role-badge', user.role]">{{ formatRole(user.role) }}</span></td>
+                  <td><span :class="['role-badge', user.role]">{{ formatUserRole(user) }}</span></td>
                   <td><span class="points-text">🪙 {{ user.points || 0 }}</span></td>
                   <td class="time-col">{{ user.created_at }}</td>
                   <td class="center">
@@ -60,75 +58,149 @@
             </table>
           </div>
           <div class="pagination">
-            <button @click="currentPage--" :disabled="currentPage === 1">Prev</button>
-            <span class="page-info">{{ currentPage }} / {{ totalPages }}</span>
-            <button @click="currentPage++" :disabled="currentPage === totalPages">Next</button>
+            <button @click="usersPage--" :disabled="usersPage === 1">上一页</button>
+            <span class="page-info">{{ usersPage }} / {{ totalUsersPages }}</span>
+            <button @click="usersPage++" :disabled="usersPage === totalUsersPages">下一页</button>
           </div>
         </div>
 
-        <div class="glass-card table-card" v-else-if="currentView === 'apply'" key="apply">
-          <div class="card-header"><h3>达人入驻申请</h3></div>
-          <div class="table-wrapper">
-            <table class="custom-table">
-              <thead>
-                <tr><th>申请人</th><th>资历描述</th><th>审核状态</th><th class="center">操作</th></tr>
-              </thead>
-              <tbody>
-                <tr v-for="item in filteredApplications" :key="item.id">
-                  <td class="name-col">{{ item.username }}</td>
-                  <td class="reason-col">{{ item.reason }}</td>
-                  <td><span :class="['status-pill', item.status]">{{ translateStatus(item.status) }}</span></td>
-                  <td class="action-cols center">
-                    <div v-if="item.status === 'pending'" class="action-btns">
-                      <button class="btn-success" @click="approve(item.username)">核准</button>
-                      <button class="btn-danger" @click="openRejectModal(item.username, 'user')">拒绝</button>
-                    </div>
-                    <span v-else class="processed-label">✅ 已处理</span>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+        <div class="glass-card table-card" v-else-if="currentView === 'applyExpert' || currentView === 'applyProvider'" key="identity-audit">
+          <div class="card-header"><h3>{{ currentView === 'applyExpert' ? '邻里达人审核' : '认证服务者审核' }}</h3></div>
+
+          <div class="audit-card">
+            <div class="audit-card-header">
+              <h4>待处理申请</h4>
+              <div class="audit-card-controls pending-controls">
+                <div class="search-input mini-search">
+                  <span class="icon">🔍</span>
+                  <input v-model="pendingSearchName" placeholder="搜索申请人..." />
+                </div>
+              </div>
+            </div>
+            <div class="table-wrapper">
+              <table class="custom-table">
+                <thead>
+                  <tr><th>申请人</th><th>资历描述</th><th>服务范围</th><th>定价参考</th><th>提交时间</th><th class="center">操作</th></tr>
+                </thead>
+                <tbody>
+                  <tr v-for="item in paginatedPendingApplications" :key="`pending-${item.id}`">
+                    <td class="name-col">{{ item.username }}</td>
+                    <td class="reason-col">{{ item.reason }}</td>
+                    <td>{{ item.service_scope || '-' }}</td>
+                    <td>{{ item.pricing_note || '-' }}</td>
+                    <td>{{ item.created_at }}</td>
+                    <td class="action-cols center">
+                      <div class="action-btns">
+                        <button class="btn-success" @click="approve(item)">通过</button>
+                        <button class="btn-danger" @click="openRejectModal(item, 'user')">拒绝</button>
+                      </div>
+                    </td>
+                  </tr>
+                  <tr v-if="pendingApplications.length === 0">
+                    <td colspan="6" class="empty-row">暂无待处理申请</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="pagination">
+              <button @click="pendingAppsPage--" :disabled="pendingAppsPage === 1">上一页</button>
+              <span class="page-info">{{ pendingAppsPage }} / {{ totalPendingAppsPages }}</span>
+              <button @click="pendingAppsPage++" :disabled="pendingAppsPage === totalPendingAppsPages">下一页</button>
+            </div>
+          </div>
+
+          <div class="audit-card">
+            <div class="audit-card-header">
+              <h4>历史申请记录</h4>
+              <div class="audit-card-controls history-controls">
+                <div class="search-input mini-search">
+                  <span class="icon">🔍</span>
+                  <input v-model="historySearchName" placeholder="搜索申请人..." />
+                </div>
+                <select v-model="applyHistoryStatusFilter" class="custom-select history-status-select">
+                  <option value="all">全部</option>
+                  <option value="approved">通过</option>
+                  <option value="rejected">拒绝</option>
+                </select>
+              </div>
+            </div>
+            <div class="table-wrapper">
+              <table class="custom-table">
+                <thead>
+                  <tr><th>申请人</th><th>资历描述</th><th>服务范围</th><th>定价参考</th><th>状态</th><th>提交时间</th></tr>
+                </thead>
+                <tbody>
+                  <tr v-for="item in paginatedHistoryApplications" :key="`history-${item.id}`">
+                    <td class="name-col">{{ item.username }}</td>
+                    <td class="reason-col">{{ item.reason }}</td>
+                    <td>{{ item.service_scope || '-' }}</td>
+                    <td>{{ item.pricing_note || '-' }}</td>
+                    <td><span :class="['status-pill', item.status]">{{ translateStatus(item.status) }}</span></td>
+                    <td>{{ item.created_at }}</td>
+                  </tr>
+                  <tr v-if="historyApplications.length === 0">
+                    <td colspan="6" class="empty-row">暂无历史申请记录</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="pagination">
+              <button @click="historyAppsPage--" :disabled="historyAppsPage === 1">上一页</button>
+              <span class="page-info">{{ historyAppsPage }} / {{ totalHistoryAppsPages }}</span>
+              <button @click="historyAppsPage++" :disabled="historyAppsPage === totalHistoryAppsPages">下一页</button>
+            </div>
           </div>
         </div>
 
         <div class="glass-card table-card" v-else-if="currentView === 'announcementManage'" key="announcement-manage">
           <div class="card-header"><h3>社区公告管理</h3></div>
           <div class="announcement-admin-panel">
-            <div class="announcement-form">
-              <input
-                v-model="announcementForm.title"
-                class="announcement-input"
-                placeholder="公告标题"
-                maxlength="100"
-              />
-              <textarea
-                v-model="announcementForm.content"
-                class="announcement-textarea"
-                placeholder="公告内容"
-                maxlength="1000"
-              />
-              <div class="announcement-form-footer">
-                <button class="btn-primary" @click="publishAnnouncement">发布公告</button>
+            <div class="announcement-admin-card">
+              <h4 class="panel-title">发布公告</h4>
+              <div class="announcement-form">
+                <input
+                  v-model="announcementForm.title"
+                  class="announcement-input"
+                  placeholder="公告标题"
+                  maxlength="100"
+                />
+                <textarea
+                  v-model="announcementForm.content"
+                  class="announcement-textarea"
+                  placeholder="公告内容"
+                  maxlength="1000"
+                />
+                <div class="announcement-form-footer">
+                  <button class="btn-primary" @click="publishAnnouncement">发布公告</button>
+                </div>
               </div>
             </div>
 
-            <div class="announcement-list">
-              <div
-                v-for="item in filteredAnnouncements"
-                :key="item.id"
-                class="announcement-item"
-              >
-                <div class="announcement-item-header">
-                  <strong>{{ item.title }}</strong>
-                  <span class="announcement-time">{{ item.created_at }}</span>
+            <div class="announcement-admin-card">
+              <h4 class="panel-title">已发布公告</h4>
+              <div class="announcement-list">
+                <div
+                  v-for="item in paginatedAnnouncements"
+                  :key="item.id"
+                  class="announcement-item"
+                >
+                  <div class="announcement-item-header">
+                    <strong>{{ item.title }}</strong>
+                    <span class="announcement-time">{{ item.created_at }}</span>
+                  </div>
+                  <p class="announcement-content">{{ item.content }}</p>
+                  <div class="announcement-item-footer">
+                    <span class="announcement-author">发布人：{{ item.author }}</span>
+                    <button class="btn-danger" @click="deleteAnnouncement(item.id)">删除</button>
+                  </div>
                 </div>
-                <p class="announcement-content">{{ item.content }}</p>
-                <div class="announcement-item-footer">
-                  <span class="announcement-author">发布人：{{ item.author }}</span>
-                  <button class="btn-danger" @click="deleteAnnouncement(item.id)">删除</button>
-                </div>
+                <div v-if="filteredAnnouncements.length === 0" class="announcement-empty">暂无公告</div>
               </div>
-              <div v-if="filteredAnnouncements.length === 0" class="announcement-empty">暂无公告</div>
+              <div class="pagination">
+                <button @click="announcementsPage--" :disabled="announcementsPage === 1">上一页</button>
+                <span class="page-info">{{ announcementsPage }} / {{ totalAnnouncementsPages }}</span>
+                <button @click="announcementsPage++" :disabled="announcementsPage === totalAnnouncementsPages">下一页</button>
+              </div>
             </div>
           </div>
         </div>
@@ -141,7 +213,7 @@
                 <tr><th>内容概要</th><th>发布者</th><th>状态</th><th>反馈理由</th><th class="center">操作</th></tr>
               </thead>
               <tbody>
-                <tr v-for="post in mixedFilteredPosts" :key="post.id">
+                <tr v-for="post in paginatedMixedFilteredPosts" :key="post.id">
                   <td class="title-col">
                     <strong>{{ post.title }}</strong>
                     <p class="excerpt">{{ post.content.substring(0, 15) }}...</p>
@@ -153,28 +225,41 @@
                     <div class="action-btns">
                       <button class="btn-ghost" @click="openDetailModal(post)">详情</button>
                       <template v-if="post.status === 'pending'">
-                        <button class="btn-success" @click="approvePost(post.id)">准许</button>
-                        <button class="btn-danger" @click="openPostRejectModal(post.id)">拦截</button>
+                        <button class="btn-success" @click="approvePost(post.id)">通过</button>
+                        <button class="btn-danger" @click="openPostRejectModal(post.id)">拒绝</button>
                       </template>
                     </div>
                   </td>
                 </tr>
+                <tr v-if="mixedFilteredPosts.length === 0">
+                  <td colspan="5" class="empty-row">暂无帖子数据</td>
+                </tr>
               </tbody>
             </table>
           </div>
+          <div class="pagination">
+            <button @click="postsPage--" :disabled="postsPage === 1">上一页</button>
+            <span class="page-info">{{ postsPage }} / {{ totalPostsPages }}</span>
+            <button @click="postsPage++" :disabled="postsPage === totalPostsPages">下一页</button>
+          </div>
         </div>
 
-        <div class="glass-card table-card" v-else-if="currentView === 'taskAudit'" key="tasks">
-          <div class="card-header"><h3>互助任务管控中心</h3></div>
-          <div class="task-audit-block">
-            <h4 class="task-audit-title">任务初审区</h4>
+        <div v-else-if="currentView === 'taskAudit'" key="tasks" class="task-audit-panels">
+          <div class="glass-card table-card task-audit-card">
+            <div class="task-card-header">
+              <h3>任务初审区</h3>
+              <div class="search-input mini-search task-mini-search">
+                <span class="icon">🔍</span>
+                <input v-model="initialTaskSearchName" placeholder="搜索任务标题或发布方..." />
+              </div>
+            </div>
             <div class="table-wrapper">
               <table class="custom-table">
                 <thead>
                   <tr><th>任务信息</th><th>发布方</th><th>悬赏积分</th><th>状态</th><th class="center">管理操作</th></tr>
                 </thead>
                 <tbody>
-                  <tr v-for="task in initialAuditTasks" :key="`initial-${task.id}`">
+                  <tr v-for="task in paginatedInitialAuditTasks" :key="`initial-${task.id}`">
                     <td class="title-col">
                       <strong>{{ task.title }}</strong>
                       <span class="category-tag">{{ formatCategory(task.category) }}</span>
@@ -195,17 +280,28 @@
                 </tbody>
               </table>
             </div>
+            <div class="pagination">
+              <button @click="initialTasksPage--" :disabled="initialTasksPage === 1">上一页</button>
+              <span class="page-info">{{ initialTasksPage }} / {{ totalInitialTasksPages }}</span>
+              <button @click="initialTasksPage++" :disabled="initialTasksPage === totalInitialTasksPages">下一页</button>
+            </div>
           </div>
 
-          <div class="task-audit-block">
-            <h4 class="task-audit-title">任务复审区</h4>
+          <div class="glass-card table-card task-audit-card">
+            <div class="task-card-header">
+              <h3>任务复审区</h3>
+              <div class="search-input mini-search task-mini-search">
+                <span class="icon">🔍</span>
+                <input v-model="recheckTaskSearchName" placeholder="搜索任务标题/发布方/接单方..." />
+              </div>
+            </div>
             <div class="table-wrapper">
               <table class="custom-table">
                 <thead>
                   <tr><th>任务信息</th><th>发布方</th><th>接单方</th><th>状态</th><th class="center">管理操作</th></tr>
                 </thead>
                 <tbody>
-                  <tr v-for="task in recheckAuditTasks" :key="`recheck-${task.id}`">
+                  <tr v-for="task in paginatedRecheckAuditTasks" :key="`recheck-${task.id}`">
                     <td class="title-col">
                       <strong>{{ task.title }}</strong>
                       <span class="category-tag">{{ formatCategory(task.category) }}</span>
@@ -225,6 +321,53 @@
                   </tr>
                 </tbody>
               </table>
+            </div>
+            <div class="pagination">
+              <button @click="recheckTasksPage--" :disabled="recheckTasksPage === 1">上一页</button>
+              <span class="page-info">{{ recheckTasksPage }} / {{ totalRecheckTasksPages }}</span>
+              <button @click="recheckTasksPage++" :disabled="recheckTasksPage === totalRecheckTasksPages">下一页</button>
+            </div>
+          </div>
+
+          <div class="glass-card table-card task-audit-card">
+            <div class="task-card-header">
+              <h3>任务终止审核区</h3>
+              <div class="search-input mini-search task-mini-search">
+                <span class="icon">🔍</span>
+                <input v-model="terminationTaskSearchName" placeholder="搜索任务标题或终止发起方..." />
+              </div>
+            </div>
+            <div class="table-wrapper">
+              <table class="custom-table">
+                <thead>
+                  <tr><th>任务信息</th><th>发起终止方</th><th>接单方</th><th>状态</th><th class="center">管理操作</th></tr>
+                </thead>
+                <tbody>
+                  <tr v-for="task in paginatedTerminationAuditTasks" :key="`termination-${task.id}`">
+                    <td class="title-col">
+                      <strong>{{ task.title }}</strong>
+                      <span class="category-tag">{{ formatCategory(task.category) }}</span>
+                    </td>
+                    <td>{{ task.terminate_requested_by || '未知' }}</td>
+                    <td>{{ task.worker || '暂无' }}</td>
+                    <td><span :class="['status-pill', task.status]">{{ translateStatus(task.status) }}</span></td>
+                    <td class="action-cols center">
+                      <div class="action-btns">
+                        <button class="btn-ghost" @click="openTaskDetailModal(task)">详情</button>
+                        <button class="btn-primary" @click="openAuditModal(task)">立即介入</button>
+                      </div>
+                    </td>
+                  </tr>
+                  <tr v-if="terminationAuditTasks.length === 0">
+                    <td colspan="5" class="empty-row">暂无待终止审核任务</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="pagination">
+              <button @click="terminationTasksPage--" :disabled="terminationTasksPage === 1">上一页</button>
+              <span class="page-info">{{ terminationTasksPage }} / {{ totalTerminationTasksPages }}</span>
+              <button @click="terminationTasksPage++" :disabled="terminationTasksPage === totalTerminationTasksPages">下一页</button>
             </div>
           </div>
         </div>
@@ -251,13 +394,13 @@
       <Transition name="zoom">
         <div v-if="showRejectModal" class="modal-overlay" @click.self="closeModal">
           <div class="modal-card reject-view">
-            <div class="modal-header"><h3>请注明驳回理由</h3></div>
+            <div class="modal-header"><h3>请注明拒绝理由</h3></div>
             <div class="modal-body">
               <textarea v-model="rejectReason" placeholder="该理由将向相关用户公示..." class="styled-textarea"></textarea>
             </div>
             <div class="modal-footer">
               <button class="btn-ghost" @click="closeModal">取消</button>
-              <button class="btn-confirm-danger" @click="confirmReject">确认驳回</button>
+              <button class="btn-confirm-danger" @click="confirmReject">确认拒绝</button>
             </div>
           </div>
         </div>
@@ -272,11 +415,27 @@
               <div v-if="selectedTask.status === 'intervention'" class="data-row dispute">
                 <strong>达人反馈：</strong><p>{{ selectedTask.result_desc || '未提供描述' }}</p>
               </div>
+              <div v-if="selectedTask.status === 'terminating_admin_review'" class="data-row dispute">
+                <strong>终止申请：</strong><p>{{ selectedTask.terminate_reason || '未填写' }}</p>
+              </div>
               <textarea v-model="auditReason" placeholder="请输入裁定依据..." class="styled-textarea" :readonly="isProcessed(selectedTask.status)"></textarea>
+              <div v-if="selectedTask.status === 'terminating_admin_review'" class="settlement-row">
+                <div class="settlement-item">
+                  <label>发单方积分</label>
+                  <input v-model.number="terminationSettlement.creatorPoints" type="number" min="0" class="settlement-input" />
+                </div>
+                <div class="settlement-item">
+                  <label>接单方积分</label>
+                  <input v-model.number="terminationSettlement.workerPoints" type="number" min="0" class="settlement-input" />
+                </div>
+                <p class="settlement-hint">
+                  分配合计：{{ (terminationSettlement.creatorPoints || 0) + (terminationSettlement.workerPoints || 0) }} / {{ selectedTask.reward_points || 0 }}
+                </p>
+              </div>
             </div>
             <div v-if="!isProcessed(selectedTask.status)" class="modal-footer">
-              <button class="btn-danger" @click="submitAudit('reject')">驳回/判输</button>
-              <button class="btn-success" @click="submitAudit('approve')">核准/判胜</button>
+              <button class="btn-danger" @click="submitAudit('reject')">拒绝/判输</button>
+              <button class="btn-success" @click="submitAudit('approve')">通过/判胜</button>
             </div>
             <div v-else class="modal-footer">
               <button class="btn-ghost" @click="showAuditModal = false">关闭视图</button>
@@ -302,9 +461,22 @@ const userStore = useUserStore()
 const adminName = computed(() => userStore.username)
 const currentView = ref('users')
 const searchName = ref('')
+const pendingSearchName = ref('')
+const historySearchName = ref('')
+const initialTaskSearchName = ref('')
+const recheckTaskSearchName = ref('')
+const terminationTaskSearchName = ref('')
+const applyHistoryStatusFilter = ref('all')
 const filterRole = ref('')
-const currentPage = ref(1)
-const pageSize = 8
+const pageSize = 5
+const usersPage = ref(1)
+const pendingAppsPage = ref(1)
+const historyAppsPage = ref(1)
+const announcementsPage = ref(1)
+const postsPage = ref(1)
+const initialTasksPage = ref(1)
+const recheckTasksPage = ref(1)
+const terminationTasksPage = ref(1)
 
 const users = ref([])
 const applications = ref([])
@@ -330,12 +502,17 @@ const currentPostDetail = ref({})
 const currentTaskDetail = ref({})
 const selectedTask = ref({})
 const auditReason = ref('')
+const terminationSettlement = ref({
+  creatorPoints: 0,
+  workerPoints: 0
+})
 
 // --- 计算属性 ---
 const viewTitle = computed(() => {
   const titles = {
     users: '用户管理系统',
-    apply: '邻里达人入驻审核',
+    applyExpert: '社区身份审核 / 邻里达人',
+    applyProvider: '社区身份审核 / 认证服务者',
     announcementManage: '社区内容管理 / 公告',
     postManage: '社区内容管理 / 帖子',
     taskAudit: '任务调度与仲裁中心'
@@ -350,6 +527,8 @@ const searchPlaceholder = computed(() => {
   return '搜索关键词或发起人...'
 })
 
+const currentApplyType = computed(() => (currentView.value === 'applyProvider' ? 'provider' : 'expert'))
+
 // 🚀 1. 帖子混合过滤逻辑
 const mixedFilteredPosts = computed(() => {
   const combined = [...auditPosts.value.map(p => ({...p, status: 'pending'})), ...auditHistory.value]
@@ -358,48 +537,106 @@ const mixedFilteredPosts = computed(() => {
     
     // 状态过滤逻辑
     let matchStatus = true
-    if (processStatusFilter.value === 'todo') matchStatus = p.status === 'pending'
-    else if (processStatusFilter.value === 'done') matchStatus = p.status !== 'pending'
+    if (processStatusFilter.value === 'pending') matchStatus = p.status === 'pending'
+    else if (processStatusFilter.value === 'approved') matchStatus = p.status === 'approved'
+    else if (processStatusFilter.value === 'rejected') matchStatus = p.status === 'rejected'
     
     return matchSearch && matchStatus
   })
 })
 
-const searchedAuditTasks = computed(() => {
+const initialAuditTasks = computed(() => {
+  const q = initialTaskSearchName.value.toLowerCase().trim()
   return auditTasks.value.filter((task) => {
-    return task.title.includes(searchName.value) || task.creator.includes(searchName.value)
+    if (task.status !== 'auditing') return false
+    if (!q) return true
+    return `${task.title || ''} ${task.creator || ''}`.toLowerCase().includes(q)
   })
 })
 
-const initialAuditTasks = computed(() => {
-  return searchedAuditTasks.value.filter((task) => task.status === 'auditing')
-})
-
 const recheckAuditTasks = computed(() => {
-  return searchedAuditTasks.value.filter((task) => task.status === 'intervention')
+  const q = recheckTaskSearchName.value.toLowerCase().trim()
+  return auditTasks.value.filter((task) => {
+    if (task.status !== 'intervention') return false
+    if (!q) return true
+    return `${task.title || ''} ${task.creator || ''} ${task.worker || ''}`.toLowerCase().includes(q)
+  })
+})
+const terminationAuditTasks = computed(() => {
+  const q = terminationTaskSearchName.value.toLowerCase().trim()
+  return auditTasks.value.filter((task) => {
+    if (task.status !== 'terminating_admin_review') return false
+    if (!q) return true
+    return `${task.title || ''} ${task.terminate_requested_by || ''} ${task.worker || ''}`.toLowerCase().includes(q)
+  })
 })
 
 const filteredUsers = computed(() => users.value.filter(u => 
   u.username.toLowerCase().includes(searchName.value.toLowerCase()) && 
-  (filterRole.value ? u.role === filterRole.value : true)
+  (filterRole.value
+    ? (
+      filterRole.value === 'expert' ? !!u.is_expert :
+      filterRole.value === 'provider' ? !!u.is_provider :
+      filterRole.value === 'resident' ? !u.is_expert && !u.is_provider && (u.role === 'resident' || u.role === 'user') :
+      u.role === filterRole.value
+    )
+    : true)
 ))
 
+const paginate = (items, page) => {
+  const start = (page - 1) * pageSize
+  return items.slice(start, start + pageSize)
+}
+const totalPagesOf = (items) => Math.max(1, Math.ceil(items.length / pageSize))
+
 const paginatedUsers = computed(() => {
-  const start = (currentPage.value - 1) * pageSize
-  return filteredUsers.value.slice(start, start + pageSize)
+  return paginate(filteredUsers.value, usersPage.value)
 })
 
-const totalPages = computed(() => Math.ceil(filteredUsers.value.length / pageSize) || 1)
+const totalUsersPages = computed(() => totalPagesOf(filteredUsers.value))
 
-const filteredApplications = computed(() => {
-  if (!applications.value) return [];
-  return applications.value.filter(item => item.username.toLowerCase().includes(searchName.value.toLowerCase()));
-});
+const currentTypeApplications = computed(() => {
+  return (applications.value || []).filter(item => item.apply_type === currentApplyType.value)
+})
+const pendingApplications = computed(() => {
+  const q = pendingSearchName.value.toLowerCase().trim()
+  return currentTypeApplications.value.filter(item =>
+    item.status === 'pending' && item.username.toLowerCase().includes(q)
+  )
+})
+const paginatedPendingApplications = computed(() => paginate(pendingApplications.value, pendingAppsPage.value))
+const totalPendingAppsPages = computed(() => totalPagesOf(pendingApplications.value))
+
+const historyApplications = computed(() => {
+  const q = historySearchName.value.toLowerCase().trim()
+  return currentTypeApplications.value.filter(item => {
+    if (item.status === 'pending') return false
+    if (applyHistoryStatusFilter.value !== 'all' && item.status !== applyHistoryStatusFilter.value) return false
+    return item.username.toLowerCase().includes(q)
+  })
+})
+const paginatedHistoryApplications = computed(() => paginate(historyApplications.value, historyAppsPage.value))
+const totalHistoryAppsPages = computed(() => totalPagesOf(historyApplications.value))
+
 const filteredAnnouncements = computed(() => {
   return adminAnnouncements.value.filter((item) => {
     return item.title.includes(searchName.value) || item.author.includes(searchName.value)
   })
 })
+const paginatedAnnouncements = computed(() => paginate(filteredAnnouncements.value, announcementsPage.value))
+const totalAnnouncementsPages = computed(() => totalPagesOf(filteredAnnouncements.value))
+
+const paginatedMixedFilteredPosts = computed(() => paginate(mixedFilteredPosts.value, postsPage.value))
+const totalPostsPages = computed(() => totalPagesOf(mixedFilteredPosts.value))
+
+const paginatedInitialAuditTasks = computed(() => paginate(initialAuditTasks.value, initialTasksPage.value))
+const totalInitialTasksPages = computed(() => totalPagesOf(initialAuditTasks.value))
+
+const paginatedRecheckAuditTasks = computed(() => paginate(recheckAuditTasks.value, recheckTasksPage.value))
+const totalRecheckTasksPages = computed(() => totalPagesOf(recheckAuditTasks.value))
+
+const paginatedTerminationAuditTasks = computed(() => paginate(terminationAuditTasks.value, terminationTasksPage.value))
+const totalTerminationTasksPages = computed(() => totalPagesOf(terminationAuditTasks.value))
 const postDetailRows = computed(() => {
   return [
     { label: '作者', value: currentPostDetail.value.author },
@@ -438,14 +675,70 @@ const taskDetailRows = computed(() => {
       value: currentTaskDetail.value.result_desc,
       multiline: true,
       visible: !!currentTaskDetail.value.result_desc
+    },
+    {
+      label: '终止发起人',
+      value: currentTaskDetail.value.terminate_requested_by,
+      visible: !!currentTaskDetail.value.terminate_requested_by
+    },
+    {
+      label: '终止原因',
+      value: currentTaskDetail.value.terminate_reason,
+      multiline: true,
+      visible: !!currentTaskDetail.value.terminate_reason
     }
   ]
 })
 
+const clampPage = (pageRef, totalRef) => {
+  if (pageRef.value > totalRef.value) pageRef.value = totalRef.value
+  if (pageRef.value < 1) pageRef.value = 1
+}
+
+watch(filteredUsers, () => {
+  usersPage.value = 1
+})
+watch(totalUsersPages, () => clampPage(usersPage, totalUsersPages))
+
+watch(pendingApplications, () => {
+  pendingAppsPage.value = 1
+})
+watch(totalPendingAppsPages, () => clampPage(pendingAppsPage, totalPendingAppsPages))
+
+watch(historyApplications, () => {
+  historyAppsPage.value = 1
+})
+watch(totalHistoryAppsPages, () => clampPage(historyAppsPage, totalHistoryAppsPages))
+
+watch(filteredAnnouncements, () => {
+  announcementsPage.value = 1
+})
+watch(totalAnnouncementsPages, () => clampPage(announcementsPage, totalAnnouncementsPages))
+
+watch(mixedFilteredPosts, () => {
+  postsPage.value = 1
+})
+watch(totalPostsPages, () => clampPage(postsPage, totalPostsPages))
+
+watch(initialAuditTasks, () => {
+  initialTasksPage.value = 1
+})
+watch(totalInitialTasksPages, () => clampPage(initialTasksPage, totalInitialTasksPages))
+
+watch(recheckAuditTasks, () => {
+  recheckTasksPage.value = 1
+})
+watch(totalRecheckTasksPages, () => clampPage(recheckTasksPage, totalRecheckTasksPages))
+
+watch(terminationAuditTasks, () => {
+  terminationTasksPage.value = 1
+})
+watch(totalTerminationTasksPages, () => clampPage(terminationTasksPage, totalTerminationTasksPages))
+
 // --- API 方法 ---
 const refreshData = () => {
   if (currentView.value === 'users') fetchUsers()
-  if (currentView.value === 'apply') fetchApplications()
+  if (currentView.value === 'applyExpert' || currentView.value === 'applyProvider') fetchApplications()
   if (currentView.value === 'announcementManage') fetchAnnouncements()
   if (currentView.value === 'postManage') { fetchAuditPosts(); fetchAuditHistory() }
   if (currentView.value === 'taskAudit') fetchAuditTasks()
@@ -464,13 +757,34 @@ const fetchAnnouncements = async () => {
 const switchView = (view) => {
   currentView.value = view
   searchName.value = ''
+  pendingSearchName.value = ''
+  historySearchName.value = ''
+  initialTaskSearchName.value = ''
+  recheckTaskSearchName.value = ''
+  terminationTaskSearchName.value = ''
+  usersPage.value = 1
+  pendingAppsPage.value = 1
+  historyAppsPage.value = 1
+  announcementsPage.value = 1
+  postsPage.value = 1
+  initialTasksPage.value = 1
+  recheckTasksPage.value = 1
+  terminationTasksPage.value = 1
+  applyHistoryStatusFilter.value = 'all'
   processStatusFilter.value = 'all' // 切换视图时重置状态
   refreshData()
 }
 
 // --- 审批逻辑 ---
 const approvePost = async (id) => { await axios.post('http://127.0.0.1:8000/api/review_post/', { id, action: 'approve' }); refreshData() }
-const approve = async (username) => { await axios.post('http://127.0.0.1:8000/api/approve/', { username }); refreshData() }
+const approve = async (item) => {
+  await axios.post('http://127.0.0.1:8000/api/approve/', {
+    id: item.id,
+    username: item.username,
+    apply_type: item.apply_type
+  })
+  refreshData()
+}
 const publishAnnouncement = async () => {
   if (!announcementForm.value.title.trim() || !announcementForm.value.content.trim()) {
     alert('请填写公告标题和内容')
@@ -528,9 +842,16 @@ const openPointsPrompt = async (user) => {
 }
 
 const confirmReject = async () => {
-  if (!rejectReason.value.trim()) return alert('请填写驳回原因')
+  if (!rejectReason.value.trim()) return alert('请填写拒绝原因')
   const url = rejectType.value === 'user' ? '/api/reject/' : '/api/review_post/'
-  const data = rejectType.value === 'user' ? { username: currentUser.value, reason: rejectReason.value } : { id: currentUser.value, action: 'reject', reason: rejectReason.value }
+  const data = rejectType.value === 'user'
+    ? {
+      id: currentUser.value?.id,
+      username: currentUser.value?.username,
+      apply_type: currentUser.value?.apply_type,
+      reason: rejectReason.value
+    }
+    : { id: currentUser.value, action: 'reject', reason: rejectReason.value }
   await axios.post(`http://127.0.0.1:8000${url}`, data)
   showRejectModal.value = false
   refreshData()
@@ -538,17 +859,59 @@ const confirmReject = async () => {
 
 const submitAudit = async (action) => {
   if (action === 'reject' && !auditReason.value.trim()) return alert('请填写理由')
-  await axios.post('http://127.0.0.1:8000/api/admin_handle_review/', { taskId: selectedTask.value.id, action, reason: auditReason.value })
+  const payload = { taskId: selectedTask.value.id, action, reason: auditReason.value }
+  if (selectedTask.value.status === 'terminating_admin_review' && action === 'approve') {
+    const creatorPoints = Number(terminationSettlement.value.creatorPoints)
+    const workerPoints = Number(terminationSettlement.value.workerPoints)
+    if (!Number.isInteger(creatorPoints) || !Number.isInteger(workerPoints) || creatorPoints < 0 || workerPoints < 0) {
+      alert('请填写合法的积分分配')
+      return
+    }
+    if (creatorPoints + workerPoints !== Number(selectedTask.value.reward_points || 0)) {
+      alert(`积分分配总和必须等于悬赏积分 ${selectedTask.value.reward_points || 0}`)
+      return
+    }
+    payload.creator_points = creatorPoints
+    payload.worker_points = workerPoints
+  }
+  await axios.post('http://127.0.0.1:8000/api/admin_handle_review/', payload)
   showAuditModal.value = false
   fetchAuditTasks()
 }
 
 // --- UI 辅助 ---
 const translateStatus = (s) => {
-  const map = { pending: '待处理', approved: '准许', rejected: '驳回', auditing: '待初审', intervention: '仲裁中', finished: '已结案' }
+  const map = {
+    pending: '待处理',
+    approved: '通过',
+    rejected: '拒绝',
+    auditing: '待初审',
+    accepted: '进行中',
+    submitted: '待确认',
+    intervention: '仲裁中',
+    terminating_pending_peer: '待对方确认终止',
+    terminating_admin_review: '待管理员终止审核',
+    terminated: '已终止',
+    finished: '已结案'
+  }
   return map[s] || s
 }
-const formatRole = (r) => ({ user: '居民', expert: '达人', admin: '管理' }[r] || r)
+const formatRole = (r) => ({
+  resident: '普通用户',
+  user: '普通用户',
+  expert: '邻里达人',
+  provider: '认证服务者',
+  admin: '管理员'
+}[r] || r)
+const formatUserRole = (u) => {
+  if (!u) return '-'
+  if (u.role === 'admin') return '管理员'
+  if (u.is_expert && u.is_provider) return '邻里达人 / 认证服务者'
+  if (u.is_expert) return '邻里达人'
+  if (u.is_provider) return '认证服务者'
+  return formatRole(u.role)
+}
+const formatApplyType = (t) => ({ expert: '邻里达人', provider: '认证服务者' }[t] || '邻里达人')
 const formatCategory = (c) => ({ errand: '跑腿', repair: '维修', pet: '宠物' }[c] || '互助')
 const isProcessed = (s) => ['pending', 'rejected', 'finished'].includes(s)
 
@@ -559,10 +922,18 @@ const openTaskDetailModal = (task) => {
   showTaskDetailModal.value = true
 }
 const closeTaskDetailModal = () => { showTaskDetailModal.value = false }
-const openRejectModal = (id, type) => { rejectType.value = type; currentUser.value = id; rejectReason.value = ''; showRejectModal.value = true }
+const openRejectModal = (payload, type) => { rejectType.value = type; currentUser.value = payload; rejectReason.value = ''; showRejectModal.value = true }
 const openPostRejectModal = (id) => openRejectModal(id, 'post')
 const closeModal = () => { showRejectModal.value = false }
-const openAuditModal = (task) => { selectedTask.value = task; auditReason.value = task.audit_reason || task.intervention_decision || ''; showAuditModal.value = true }
+const openAuditModal = (task) => {
+  selectedTask.value = task
+  auditReason.value = task.audit_reason || task.intervention_decision || task.terminate_reject_reason || ''
+  terminationSettlement.value = {
+    creatorPoints: Number(task.terminate_creator_points ?? task.reward_points ?? 0),
+    workerPoints: Number(task.terminate_worker_points ?? 0)
+  }
+  showAuditModal.value = true
+}
 
 onMounted(refreshData)
 </script>
@@ -591,9 +962,77 @@ onMounted(refreshData)
 .custom-table { width: 100%; border-collapse: collapse; }
 .custom-table th { text-align: left; padding: 15px; color: #889891; border-bottom: 2px solid #f0f4f2; }
 .custom-table td { padding: 20px 15px; border-bottom: 1px solid #f0f4f2; font-size: 14px; }
+.pagination {
+  margin-top: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+.pagination button {
+  border: 1px solid #d9e4de;
+  background: #fff;
+  color: #1a4d38;
+  border-radius: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+.pagination button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.page-info {
+  color: #64748b;
+  font-size: 13px;
+}
 .excerpt { font-size: 12px; color: #94a3b8; margin-top: 4px; }
-.task-audit-block + .task-audit-block { margin-top: 28px; }
-.task-audit-title { margin: 0 0 10px; color: #1a4d38; font-size: 18px; }
+.task-audit-panels {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+.task-audit-card {
+  overflow: hidden;
+}
+.task-card-header {
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.task-card-header h3 {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  color: #1a4d38;
+  font-size: 20px;
+}
+.task-mini-search {
+  width: 320px !important;
+  min-width: 320px;
+  max-width: 320px !important;
+  flex: 0 0 320px !important;
+  margin-left: auto;
+  margin-right: 16px;
+  box-sizing: border-box;
+}
+.task-card-header .task-mini-search input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+@media (max-width: 1200px) {
+  .task-card-header {
+    flex-wrap: wrap;
+  }
+  .task-mini-search {
+    width: 80% !important;
+    min-width: 0;
+    max-width: 320px !important;
+    flex: 0 1 320px !important;
+  }
+}
 .empty-row { text-align: center; color: #94a3b8; padding: 26px 0; }
 .category-tag {
   display: inline-block;
@@ -606,6 +1045,11 @@ onMounted(refreshData)
 }
 .announcement-admin-panel {
   margin-bottom: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.announcement-admin-card {
   border: 1px solid #e2ece7;
   border-radius: 16px;
   background: #f8faf9;
@@ -620,7 +1064,6 @@ onMounted(refreshData)
   display: flex;
   flex-direction: column;
   gap: 10px;
-  margin-bottom: 12px;
 }
 .announcement-input,
 .announcement-textarea {
@@ -680,12 +1123,123 @@ onMounted(refreshData)
   color: #94a3b8;
   padding: 8px 0;
 }
+.audit-card {
+  border: 1px solid #e2ece7;
+  border-radius: 16px;
+  padding: 14px;
+  background: #f8faf9;
+  overflow: hidden;
+}
+.audit-card + .audit-card {
+  margin-top: 16px;
+}
+.audit-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: nowrap;
+  margin-bottom: 10px;
+  gap: 12px;
+}
+.audit-card-header h4 {
+  margin: 0;
+  color: #1a4d38;
+  font-size: 16px;
+}
+.audit-card-controls {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: nowrap;
+}
+.audit-card-controls .search-input {
+  flex: 0 0 auto;
+  max-width: none;
+}
+.pending-controls {
+  width: auto;
+  min-width: 0;
+  flex: 0 0 auto;
+  margin-right: 12px;
+  box-sizing: border-box;
+}
+.history-controls {
+  width: auto;
+  min-width: 0;
+  flex: 0 0 auto;
+  margin-right: 12px;
+}
+.mini-search {
+  width: 320px !important;
+  min-width: 320px;
+  max-width: 320px !important;
+  flex: 0 0 320px !important;
+  margin-right: 8px;
+  box-sizing: border-box;
+}
+.mini-search input {
+  width: 100%;
+  padding: 10px 12px 10px 38px;
+  box-sizing: border-box;
+}
+.mini-search .icon {
+  left: 12px;
+}
+.history-status-select {
+  width: 140px;
+  min-width: 140px;
+  justify-self: end;
+  flex: 0 0 140px;
+}
+
+@media (max-width: 1200px) {
+  .audit-card-header {
+    flex-wrap: wrap;
+  }
+  .audit-card-controls {
+    width: 100%;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+  }
+  .pending-controls {
+    width: auto;
+    min-width: 0;
+  }
+  .history-controls {
+    width: auto;
+    min-width: 0;
+    margin-right: 0;
+  }
+  .mini-search {
+    width: 80% !important;
+    max-width: 320px !important;
+    min-width: 0;
+    flex: 0 1 320px !important;
+  }
+  .history-status-select {
+    width: 140px;
+    min-width: 140px;
+  }
+}
 
 /* 标签与按钮 */
 .status-pill, .role-badge { padding: 5px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; }
-.status-pill.pending, .status-pill.auditing { background: #fffbeb; color: #b45309; }
-.status-pill.approved, .status-pill.finished { background: #f0fdf4; color: #15803d; }
-.status-pill.rejected { background: #fef2f2; color: #991b1b; }
+.type-pill { padding: 5px 12px; border-radius: 999px; font-size: 12px; font-weight: 700; }
+.type-pill.expert { background: #eef2ff; color: #3730a3; }
+.type-pill.provider { background: #ecfeff; color: #0f766e; }
+.status-pill.auditing { background: #fef9c3; color: #a16207; }
+.status-pill.pending { background: #e0f2fe; color: #0369a1; }
+.status-pill.approved { background: #dcfce7; color: #166534; }
+.status-pill.rejected { background: #fee2e2; color: #991b1b; }
+.status-pill.accepted { background: #dbeafe; color: #1d4ed8; }
+.status-pill.submitted { background: #ede9fe; color: #5b21b6; }
+.status-pill.intervention { background: #ffedd5; color: #c2410c; }
+.status-pill.terminating_pending_peer { background: #ffe4e6; color: #be123c; }
+.status-pill.terminating_admin_review { background: #fef3c7; color: #92400e; }
+.status-pill.finished { background: #d1fae5; color: #065f46; }
+.status-pill.terminated { background: #e2e8f0; color: #334155; }
 
 .action-btns { display: flex; gap: 8px; }
 .btn-success { background: #10b981; color: white; border: none; padding: 8px 16px; border-radius: 10px; cursor: pointer; }
@@ -754,6 +1308,34 @@ onMounted(refreshData)
   line-height: 1.6;
   color: #4a5568;
   border: 1px solid #edf2f0;
+}
+.settlement-row {
+  margin-top: 10px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid #e2ece7;
+  background: #f8faf9;
+}
+.settlement-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.settlement-item label {
+  font-size: 13px;
+  color: #1a4d38;
+}
+.settlement-input {
+  border: 1px solid #d9e4de;
+  border-radius: 10px;
+  padding: 8px 10px;
+  outline: none;
+}
+.settlement-hint {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: #64748b;
 }
 
 /* 滚动内容区 */

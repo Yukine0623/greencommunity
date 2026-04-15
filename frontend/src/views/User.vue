@@ -15,8 +15,12 @@
               <span class="role-badge">{{ roleText }}</span>
             </div>
             <div class="user-detail">
-              <span class="label">当前登录：</span>
+              <span class="label">用户名：</span>
               <span class="value">{{ username }}</span>
+            </div>
+            <div class="user-detail">
+              <span class="label">剩余积分：</span>
+              <span class="value">🪙 {{ userStore.points || 0 }}</span>
             </div>
           </div>
 
@@ -25,58 +29,107 @@
               <h3>邻里达人申请状态</h3>
             </div>
             <div class="status-display">
-              <p v-if="status === 'none'" class="status-text none">你还没有申请</p>
+              <p v-if="expertStatus === 'none'" class="status-text none">你还没有申请</p>
               
-              <div v-if="status === 'pending'" class="status-box pending">
+              <div v-if="expertStatus === 'pending'" class="status-box pending">
                 <span class="icon">⏳</span>
                 <p>审核中，请耐心等待管理员处理</p>
               </div>
 
-              <div v-if="status === 'approved'" class="status-box approved">
+              <div v-if="expertStatus === 'approved'" class="status-box approved">
                 <span class="icon">🎉</span>
-                <p>已通过，您现在是邻里达人</p>
+                <p>通过，您现在是邻里达人</p>
               </div>
 
-              <div v-if="status === 'rejected'" class="status-box rejected">
+              <div v-if="expertStatus === 'rejected'" class="status-box rejected">
                 <span class="icon">❌</span>
                 <p>申请被拒绝，可以修改理由后重新申请</p>
               </div>
+            </div>
+          </div>
+
+          <div class="glass-card status-card">
+            <div class="card-header">
+              <h3>认证服务者申请状态</h3>
+            </div>
+            <div class="status-display">
+              <p v-if="providerStatus === 'none'" class="status-text none">你还没有申请</p>
+              
+              <div v-if="providerStatus === 'pending'" class="status-box pending">
+                <span class="icon">⏳</span>
+                <p>审核中，请耐心等待管理员处理</p>
+              </div>
+
+              <div v-if="providerStatus === 'approved'" class="status-box approved">
+                <span class="icon">🎉</span>
+                <p>通过，您现在是认证服务者</p>
+              </div>
+
+              <div v-if="providerStatus === 'rejected'" class="status-box rejected">
+                <span class="icon">❌</span>
+                <p>申请被拒绝，可以修改资料后重新申请</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="glass-card task-summary-card">
+          <div class="card-header">
+            <h3>我的任务状态统计</h3>
+            <button class="collapse-btn" @click="taskSummaryCollapsed = !taskSummaryCollapsed">
+              {{ taskSummaryCollapsed ? '展开 ▾' : '收起 ▴' }}
+            </button>
+          </div>
+          <div v-if="!taskSummaryCollapsed" class="summary-grid">
+            <div class="summary-item" v-for="item in taskStatusSummary" :key="item.key">
+              <span class="summary-label">{{ item.label }}</span>
+              <span class="summary-value">{{ item.count }}</span>
             </div>
           </div>
         </div>
 
         <div 
           class="glass-card apply-action-card"
-          v-if="status === 'none' || status === 'rejected'"
+          v-if="canApplyCurrentType"
         >
           <div class="card-header">
-            <h3>申请成为邻里达人</h3>
+            <h3>申请服务身份认证</h3>
           </div>
           <div class="apply-form">
-            <input v-model="reason" placeholder="请输入您的申请理由..." />
+            <select v-model="applyType">
+              <option value="expert">申请成为邻里达人</option>
+              <option value="provider">申请成为认证服务者</option>
+            </select>
+            <input v-model="reason" placeholder="请输入申请理由（必填）..." />
+            <input v-model="serviceScope" placeholder="服务范围（认证服务者建议填写，如：家电维修/管道疏通）" />
+            <input v-model="pricingNote" placeholder="定价参考（可选，如：上门检测30元起）" />
             <button class="btn-primary" @click="handleApply">提交申请</button>
           </div>
         </div>
 
-        <div 
-          class="glass-card history-card"
-          v-if="status === 'pending' || status === 'rejected'"
-        >
+        <div class="glass-card history-card">
           <div class="card-header">
             <h3>申请历史记录</h3>
+            <button class="collapse-btn" @click="historyCollapsed = !historyCollapsed">
+              {{ historyCollapsed ? '展开 ▾' : '收起 ▴' }}
+            </button>
           </div>
-          <div class="table-wrapper">
+          <div v-if="!historyCollapsed" class="table-wrapper">
             <table class="custom-table">
               <thead>
                 <tr>
+                  <th>申请类型</th>
                   <th>审核状态</th>
                   <th>提交时间</th>
                   <th>审核时间</th>
+                  <th>服务范围</th>
+                  <th>定价参考</th>
                   <th>拒绝理由</th>
                 </tr>
               </thead>
               <tbody>
                 <tr v-for="item in applicationHistory" :key="item.id">
+                  <td>{{ formatApplyType(item.apply_type) }}</td>
                   <td>
                     <span :class="['status-tag', item.status]">
                       {{ formatStatus(item.status) }}
@@ -84,6 +137,8 @@
                   </td>
                   <td class="time-col">{{ item.created_at }}</td>
                   <td class="time-col">{{ item.reviewed_at || '-' }}</td>
+                  <td>{{ item.service_scope || '-' }}</td>
+                  <td>{{ item.pricing_note || '-' }}</td>
                   <td class="reason-col">{{ item.reject_reason || '-' }}</td>
                 </tr>
               </tbody>
@@ -98,27 +153,68 @@
 </template>
 
 <script setup>
-import Sidebar from '@/components/Sidebar.vue'
 import { useUserStore } from '@/store/user'
 import { ref, onMounted, computed } from 'vue'
 import axios from 'axios'
-import { useRouter } from 'vue-router'
 
 const userStore = useUserStore()
-const router = useRouter()
 
 const username = computed(() => userStore.username)
 const role = computed(() => userStore.role)
 
-const status = ref('')
+const expertStatus = ref('none')
+const providerStatus = ref('none')
+const applyType = ref('expert')
 const reason = ref('')
+const serviceScope = ref('')
+const pricingNote = ref('')
 const applicationHistory = ref([])
+const taskSummaryCollapsed = ref(false)
+const historyCollapsed = ref(false)
+const taskStatusCount = ref({
+  auditing: 0,
+  pending: 0,
+  accepted: 0,
+  submitted: 0,
+  intervention: 0,
+  terminating_pending_peer: 0,
+  terminating_admin_review: 0,
+  finished: 0,
+  terminated: 0,
+  rejected: 0
+})
 
 const roleText = computed(() => {
-  if (role.value === 'resident') return '普通用户'
-  if (role.value === 'expert') return '邻里达人'
   if (role.value === 'admin') return '管理员'
+  if (userStore.isExpert && userStore.isProvider) return '邻里达人 / 认证服务者'
+  if (userStore.isExpert) return '邻里达人'
+  if (userStore.isProvider) return '认证服务者'
+  if (role.value === 'resident' || role.value === 'user') return '普通用户'
   return '未知身份'
+})
+
+const canApplyCurrentType = computed(() => {
+  if (applyType.value === 'expert') return ['none', 'rejected'].includes(expertStatus.value)
+  return ['none', 'rejected'].includes(providerStatus.value)
+})
+const taskStatusSummary = computed(() => {
+  const labelMap = {
+    auditing: '审核中',
+    pending: '招募中',
+    accepted: '进行中',
+    submitted: '待确认',
+    intervention: '仲裁中',
+    terminating_pending_peer: '待对方确认终止',
+    terminating_admin_review: '待管理员终止审核',
+    finished: '已完成',
+    terminated: '已终止',
+    rejected: '被驳回'
+  }
+  return Object.keys(taskStatusCount.value).map((key) => ({
+    key,
+    label: labelMap[key] || key,
+    count: taskStatusCount.value[key] || 0
+  }))
 })
 
 // 获取用户信息
@@ -130,33 +226,46 @@ const fetchUserInfo = async () => {
     
     userStore.role = res.data.role
     userStore.points = res.data.points || 0
+    userStore.isExpert = !!res.data.is_expert
+    userStore.isProvider = !!res.data.is_provider
     
   } catch (error) {
     console.error("获取用户信息失败:", error)
   }
 }
 
-const fetchMyApplication = async () => {
+const fetchMyApplication = async (targetType) => {
   const res = await axios.post('http://127.0.0.1:8000/api/my_application/', {
-    username: username.value
+    username: username.value,
+    apply_type: targetType
   })
-  status.value = res.data.status
+  if (targetType === 'expert') expertStatus.value = res.data.status || 'none'
+  else providerStatus.value = res.data.status || 'none'
 }
 
 const handleApply = async () => {
+  if (!reason.value.trim()) {
+    alert('请先填写申请理由')
+    return
+  }
+  if (applyType.value === 'provider' && !serviceScope.value.trim()) {
+    alert('认证服务者请填写服务范围')
+    return
+  }
   const res = await axios.post('http://127.0.0.1:8000/api/apply/', {
     username: username.value,
-    reason: reason.value
+    apply_type: applyType.value,
+    reason: reason.value,
+    service_scope: serviceScope.value,
+    pricing_note: pricingNote.value
   })
   alert(res.data.message)
   reason.value = ''
-  await fetchMyApplication()
+  serviceScope.value = ''
+  pricingNote.value = ''
+  await fetchMyApplication('expert')
+  await fetchMyApplication('provider')
   await fetchApplicationHistory()
-}
-
-const logout = () => {
-  localStorage.clear()
-  router.push('/')
 }
 
 const fetchApplicationHistory = async () => {
@@ -169,17 +278,58 @@ const fetchApplicationHistory = async () => {
   applicationHistory.value = res.data.data
 }
 
+const fetchMyTaskSummary = async () => {
+  try {
+    const res = await axios.get('http://127.0.0.1:8000/api/my_tasks/', {
+      params: { username: username.value }
+    })
+    const posted = res.data.posted || []
+    const accepted = res.data.accepted || []
+    const dedup = new Map()
+    ;[...posted, ...accepted].forEach((task) => {
+      if (!dedup.has(task.id)) dedup.set(task.id, task)
+    })
+    const next = {
+      auditing: 0,
+      pending: 0,
+      accepted: 0,
+      submitted: 0,
+      intervention: 0,
+      terminating_pending_peer: 0,
+      terminating_admin_review: 0,
+      finished: 0,
+      terminated: 0,
+      rejected: 0
+    }
+    dedup.forEach((task) => {
+      if (Object.prototype.hasOwnProperty.call(next, task.status)) {
+        next[task.status] += 1
+      }
+    })
+    taskStatusCount.value = next
+  } catch (error) {
+    console.error('获取任务统计失败:', error)
+  }
+}
+
 const formatStatus = (status) => {
   if (status === 'pending') return '审核中'
-  if (status === 'approved') return '已通过'
+  if (status === 'approved') return '通过'
   if (status === 'rejected') return '已拒绝'
   return '未知状态'
 }
 
+const formatApplyType = (type) => {
+  if (type === 'provider') return '认证服务者'
+  return '邻里达人'
+}
+
 onMounted(() => {
   fetchUserInfo()
-  fetchMyApplication()
+  fetchMyApplication('expert')
+  fetchMyApplication('provider')
   fetchApplicationHistory()
+  fetchMyTaskSummary()
 })
 </script>
 
@@ -226,7 +376,7 @@ onMounted(() => {
 /* 上部两卡片并排 */
 .top-cards-grid {
   display: grid;
-  grid-template-columns: 1fr 1.5fr; /* 左右卡片比例 */
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 25px;
 }
 
@@ -279,6 +429,7 @@ onMounted(() => {
 .user-detail {
   display: flex;
   align-items: center;
+  margin-bottom: 8px;
 }
 .user-detail .label { color: #718096; }
 .user-detail .value {
@@ -312,14 +463,17 @@ onMounted(() => {
   gap: 15px;
 }
 
-input {
+.apply-form select,
+.apply-form input {
   padding: 12px 15px;
   border: 1px solid #e2e8f0;
   border-radius: 10px;
   outline: none;
   transition: all 0.2s;
+  background: #fff;
 }
-input:focus {
+.apply-form select:focus,
+.apply-form input:focus {
   border-color: #63b3ed; /* 浅蓝高亮 */
   box-shadow: 0 0 0 3px rgba(66, 153, 225, 0.15);
 }
@@ -377,4 +531,46 @@ input:focus {
 
 .time-col { color: #64748b; font-size: 13px; }
 .reason-col { color: #e53e3e; }
+
+.task-summary-card .summary-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+}
+.summary-item {
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #f8fafc;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.summary-label {
+  color: #64748b;
+  font-size: 12px;
+}
+.summary-value {
+  color: #1e293b;
+  font-size: 20px;
+  font-weight: 700;
+}
+.collapse-btn {
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  color: #475569;
+  border-radius: 8px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+@media (max-width: 1200px) {
+  .top-cards-grid {
+    grid-template-columns: 1fr;
+  }
+  .task-summary-card .summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
 </style>

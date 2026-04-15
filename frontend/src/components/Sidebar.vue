@@ -10,7 +10,9 @@
         <span class="role-badge">
           {{ 
             userStore.role === 'admin' ? '管理员' : 
-            userStore.role === 'expert' ? '邻里达人' : '普通用户' 
+            userStore.isExpert && userStore.isProvider ? '邻里达人 / 认证服务者' :
+            userStore.isExpert ? '邻里达人' :
+            userStore.isProvider ? '认证服务者' : '普通用户' 
           }}
         </span>
         <p class="welcome-text">您好，<span>{{ userStore.username || '访客' }}</span></p>

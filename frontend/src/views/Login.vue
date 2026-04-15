@@ -88,7 +88,7 @@ const handleRegister = async () => {
       </div>
       <div class="button-group">
         <button class="btn-login" @click="handleLogin">登录</button>
-        <button class="btn-register" @click="handleRegister">注册</button>
+        <button class="btn-register" @click="goRegister">注册</button>
       </div>
       <p :class="['status-msg', isError ? 'error' : 'success']" v-if="message">{{ message }}</p>
     </div>
@@ -123,7 +123,9 @@ const handleLogin = async () => {
       userStore.setUserInfo({
         username: username.value,
         role: res.data.role,
-        points: res.data.points || 0
+        points: res.data.points || 0,
+        is_expert: !!res.data.is_expert,
+        is_provider: !!res.data.is_provider
       })
       
       // 根据角色跳转
@@ -143,18 +145,8 @@ const handleLogin = async () => {
   }
 }
 
-const handleRegister = async () => {
-  try {
-    isError.value = false
-    const res = await axios.post('http://127.0.0.1:8000/api/register/', {
-      username: username.value,
-      password: password.value
-    })
-    message.value = res.data.message
-  } catch (err) {
-    isError.value = true
-    message.value = '注册出错'
-  }
+const goRegister = () => {
+  router.push('/register')
 }
 </script>
 

@@ -4,7 +4,8 @@ from users.views import login, register, user_list, get_posts, create_post, upda
     get_my_application, approve_expert, reject_expert, application_list, get_user_info, my_application_history, \
     all_pending_posts, review_post, get_post_history, get_audit_history, get_tasks, create_task, accept_task, \
     get_my_tasks, submit_task, abandon_task, finish_task, get_audit_tasks, admin_handle_review, get_admin_all_tasks, \
-    complete_task, get_announcements, create_announcement, delete_announcement, update_user_points
+    complete_task, get_announcements, create_announcement, delete_announcement, update_user_points, update_task, \
+    delete_task, request_terminate_task, respond_terminate_task
 from users.views import get_chat_messages, send_chat_message
 
 urlpatterns = [
@@ -36,6 +37,10 @@ urlpatterns = [
     path('submit_task/', submit_task),
     path('abandon_task/', abandon_task),
     path('finish_task/',finish_task),
+    path('update_task/', update_task),
+    path('delete_task/', delete_task),
+    path('request_terminate_task/', request_terminate_task),
+    path('respond_terminate_task/', respond_terminate_task),
     path('get_audit_tasks/', get_audit_tasks),
     path('admin_handle_review/', admin_handle_review),
     path('get_admin_all_tasks/', get_admin_all_tasks),

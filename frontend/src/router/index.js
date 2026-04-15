@@ -115,6 +115,7 @@ import { useUserStore } from '@/store/user' // 引入上面的 store
 
 // 1. 导入页面组件
 import Login from '@/views/Login.vue'
+import Register from '@/views/Register.vue'
 import User from '@/views/User.vue'
 import Forum from '@/views/Forum.vue'
 import Admin from '@/views/Admin.vue'
@@ -129,6 +130,11 @@ const routes = [
     path: '/',
     name: 'login',
     component: Login
+  },
+  {
+    path: '/register',
+    name: 'register',
+    component: Register
   },
   {
     path: '/admin',
@@ -174,7 +180,7 @@ router.beforeEach((to, from, next) => {
   const userStore = useUserStore() // 在守卫内部获取 store 实例
 
   // 如果访问的不是登录页，且用户名为空（未登录）
-  if (to.path !== '/' && !userStore.username) {
+  if (!['/', '/register'].includes(to.path) && !userStore.username) {
     console.warn('未登录，拦截并跳转到登录页')
     next('/')
   } else {

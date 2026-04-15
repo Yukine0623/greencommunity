@@ -71,7 +71,9 @@ export const useUserStore = defineStore('user', {
     username: '', // 登录后存入用户名
     token: '',    // 登录后的身份令牌
     role: '',
-    points: 0
+    points: 0,
+    isExpert: false,
+    isProvider: false
   }),
   
   actions: {
@@ -84,6 +86,8 @@ export const useUserStore = defineStore('user', {
       this.username = payload?.username || ''
       this.role = payload?.role || ''
       this.points = Number(payload?.points || 0)
+      this.isExpert = Boolean(payload?.is_expert ?? payload?.isExpert ?? false)
+      this.isProvider = Boolean(payload?.is_provider ?? payload?.isProvider ?? false)
     },
     // 退出登录时清空
     clearUserInfo() {
@@ -91,6 +95,8 @@ export const useUserStore = defineStore('user', {
       this.token = ''
       this.role = ''
       this.points = 0
+      this.isExpert = false
+      this.isProvider = false
     }
   }
 })

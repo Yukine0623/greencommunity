@@ -47,7 +47,7 @@
 
         <div class="card-footer">
           <div class="action-group">
-            <template v-if="userRole === 'expert' || userRole === 'provider'">
+            <template v-if="canAcceptTasks">
               <button class="btn-accept" @click="handleAccept(task.id)">接受任务</button>
             </template>
             <button class="btn-detail" @click="openDetail(task)">查看详情</button>
@@ -103,10 +103,29 @@
 
             <div class="form-item">
               <label>任务位置（可选）</label>
+              <input v-model="publishLocation.community_zone" maxlength="50" placeholder="手动填写片区/地点（如：A区3栋附近）" />
+              <div class="location-manual-grid">
+                <input
+                  v-model.number="publishLocation.latitude"
+                  type="number"
+                  step="0.000001"
+                  min="-90"
+                  max="90"
+                  placeholder="手动填写纬度（可选）"
+                />
+                <input
+                  v-model.number="publishLocation.longitude"
+                  type="number"
+                  step="0.000001"
+                  min="-180"
+                  max="180"
+                  placeholder="手动填写经度（可选）"
+                />
+              </div>
               <div class="location-actions">
                 <button class="btn-location" type="button" @click="handleGetPublishLocation">获取当前位置</button>
                 <button
-                  v-if="publishLocation.latitude && publishLocation.longitude"
+                  v-if="publishLocation.latitude !== null || publishLocation.longitude !== null || publishLocation.community_zone"
                   class="btn-location-clear"
                   type="button"
                   @click="clearPublishLocation"
@@ -116,7 +135,7 @@
               </div>
               <small class="form-tip">可不填写。填写后会用于任务距离计算与附近排序。</small>
               <small
-                v-if="publishLocation.latitude && publishLocation.longitude"
+                v-if="publishLocation.latitude !== null && publishLocation.longitude !== null"
                 class="location-value"
               >
                 已获取：{{ publishLocation.latitude }}, {{ publishLocation.longitude }}
@@ -147,6 +166,7 @@ import DetailModal from '@/components/DetailModal.vue'
 const userStore = useUserStore()
 const userRole = computed(() => userStore.role)
 const username = computed(() => userStore.username)
+const canAcceptTasks = computed(() => userStore.isExpert || userStore.isProvider)
 
 // 状态管理
 const tasks = ref([])
@@ -161,6 +181,7 @@ const userLocation = ref({
   longitude: null
 })
 const publishLocation = ref({
+  community_zone: '',
   latitude: null,
   longitude: null
 })
@@ -198,6 +219,7 @@ const handleGetPublishLocation = () => {
   )
 }
 const clearPublishLocation = () => {
+  publishLocation.value.community_zone = ''
   publishLocation.value.latitude = null
   publishLocation.value.longitude = null
 }
@@ -231,6 +253,7 @@ const submitTask = async () => {
       content: newTask.value.content,
       category: newTask.value.category,
       reward_points: Number(newTask.value.reward_points || 10),
+      community_zone: publishLocation.value.community_zone || null,
       latitude: publishLocation.value.latitude,
       longitude: publishLocation.value.longitude,
       username: username.value  // 👈 重点：这里的 Key 必须叫 username
@@ -450,6 +473,11 @@ const formatCategory = (cat) => {
 .location-actions {
   display: flex;
   align-items: center;
+  gap: 8px;
+}
+.location-manual-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 8px;
 }
 .btn-location,

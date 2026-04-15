@@ -5,6 +5,8 @@ class User(models.Model):
     username = models.CharField(max_length=50, unique=True)  # 用户名唯一
     password = models.CharField(max_length=128)  # 可以存明文，生产环境建议哈希
     role = models.CharField(max_length=20, default='user')  # 用户角色：user / admin / 邻里达人
+    is_expert = models.BooleanField(default=False, verbose_name="邻里达人资格")
+    is_provider = models.BooleanField(default=False, verbose_name="认证服务者资格")
     phone = models.CharField(max_length=20, null=True, blank=True)
     points = models.IntegerField(default=100, verbose_name="互助积分")
     created_at = models.DateTimeField(auto_now_add=True)  # 创建时间
@@ -56,9 +58,17 @@ class PostHistory(models.Model):
 
 # 申请成为邻里达人
 class ExpertApplication(models.Model):
+    APPLY_TYPE_CHOICES = [
+        ('expert', '邻里达人'),
+        ('provider', '认证服务者'),
+    ]
+
     username = models.CharField(max_length=50)
+    apply_type = models.CharField(max_length=20, choices=APPLY_TYPE_CHOICES, default='expert')
 
     reason = models.TextField()  # 申请理由
+    service_scope = models.CharField(max_length=100, null=True, blank=True, verbose_name='服务范围')
+    pricing_note = models.CharField(max_length=120, null=True, blank=True, verbose_name='定价参考')
 
     status = models.CharField(max_length=20, default='pending')     # pending / approved / rejected
 
@@ -111,7 +121,7 @@ class Task(models.Model):
     # submitted: 已完成提交 (待用户确认)
     # intervention: 争议介入 (用户不满意请求仲裁)
     # finished: 已圆满完成 (归档)
-    status = models.CharField(max_length=20, default='auditing')
+    status = models.CharField(max_length=40, default='auditing')
 
     # 5. 流程描述字段
     result_desc = models.TextField(null=True, blank=True, verbose_name="达人提交成果描述")
@@ -120,11 +130,18 @@ class Task(models.Model):
     # 6. 🚀 审批与历史记录的核心
     audit_reason = models.TextField(null=True, blank=True, verbose_name="管理员审核/拒绝理由")
     intervention_decision = models.TextField(null=True, blank=True, verbose_name="仲裁判定判定依据")
+    terminate_requested_by = models.CharField(max_length=50, null=True, blank=True, verbose_name="终止申请发起人")
+    terminate_reason = models.TextField(null=True, blank=True, verbose_name="终止申请原因")
+    terminate_agreed_by = models.CharField(max_length=50, null=True, blank=True, verbose_name="终止申请同意人")
+    terminate_reject_reason = models.TextField(null=True, blank=True, verbose_name="终止申请拒绝/驳回原因")
+    terminate_creator_points = models.IntegerField(null=True, blank=True, verbose_name="终止结算发单方积分")
+    terminate_worker_points = models.IntegerField(null=True, blank=True, verbose_name="终止结算接单方积分")
 
     # 7. 时间戳
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
     accepted_at = models.DateTimeField(null=True, blank=True, verbose_name="接单时间")
     submitted_at = models.DateTimeField(null=True, blank=True, verbose_name="提交成果时间")
+    terminated_at = models.DateTimeField(null=True, blank=True, verbose_name="终止时间")
     # 🚀 增加这个字段：每次 save() 时自动更新，用于记录“处理时间”
     updated_at = models.DateTimeField(auto_now=True, verbose_name="最后更新时间")
 

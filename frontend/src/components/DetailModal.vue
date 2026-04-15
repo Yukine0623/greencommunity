@@ -173,33 +173,17 @@ const formatValue = (value) => {
   color: #475569;
 }
 
-.badge-pending,
-.badge-auditing {
-  background: #fffbeb;
-  color: #b45309;
-}
-
-.badge-approved,
-.badge-finished {
-  background: #f0fdf4;
-  color: #15803d;
-}
-
-.badge-rejected {
-  background: #fef2f2;
-  color: #b91c1c;
-}
-
-.badge-accepted {
-  background: #e0f2fe;
-  color: #0369a1;
-}
-
-.badge-submitted,
-.badge-intervention {
-  background: #eef2ff;
-  color: #4338ca;
-}
+.badge-auditing { background: #fef9c3; color: #a16207; }
+.badge-pending { background: #e0f2fe; color: #0369a1; }
+.badge-approved { background: #dcfce7; color: #166534; }
+.badge-rejected { background: #fee2e2; color: #991b1b; }
+.badge-accepted { background: #dbeafe; color: #1d4ed8; }
+.badge-submitted { background: #ede9fe; color: #5b21b6; }
+.badge-intervention { background: #ffedd5; color: #c2410c; }
+.badge-terminating_pending_peer { background: #ffe4e6; color: #be123c; }
+.badge-terminating_admin_review { background: #fef3c7; color: #92400e; }
+.badge-finished { background: #d1fae5; color: #065f46; }
+.badge-terminated { background: #e2e8f0; color: #334155; }
 
 .detail-multiline {
   white-space: pre-wrap;

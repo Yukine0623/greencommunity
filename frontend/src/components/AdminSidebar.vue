@@ -24,11 +24,28 @@
       </div>
       
       <div 
-        class="nav-item" 
-        :class="{ active: currentActive === 'apply' }"
-        @click="handleSwitch('apply')"
+        class="nav-item nav-group"
+        :class="{ active: isIdentityAuditActive }"
+        @click="toggleIdentityAudit"
       >
-        <span class="icon">📝</span> 邻里达人审核
+        <span class="icon">📝</span> 社区身份审核
+        <span class="chevron">{{ identityAuditOpen ? '▾' : '▸' }}</span>
+      </div>
+      <div v-if="identityAuditOpen" class="sub-menu">
+        <div
+          class="sub-nav-item"
+          :class="{ active: currentActive === 'applyExpert' }"
+          @click="handleSwitch('applyExpert')"
+        >
+          邻里达人审核
+        </div>
+        <div
+          class="sub-nav-item"
+          :class="{ active: currentActive === 'applyProvider' }"
+          @click="handleSwitch('applyProvider')"
+        >
+          认证服务者审核
+        </div>
       </div>
 
       <div
@@ -87,7 +104,9 @@ const router = useRouter()
 // 🚀 核心：统一使用 currentActive 记录当前激活的菜单项
 const currentActive = ref('users')
 const contentManageOpen = ref(false)
+const identityAuditOpen = ref(false)
 const isContentManageActive = computed(() => ['announcementManage', 'postManage'].includes(currentActive.value))
+const isIdentityAuditActive = computed(() => ['applyExpert', 'applyProvider'].includes(currentActive.value))
 
 
 const logout = () => {
@@ -98,6 +117,9 @@ const logout = () => {
 const handleSwitch = (view) => {
   console.log('侧边栏点击了，发送的值是:', view) // 🚀 加这一行
   currentActive.value = view
+  if (view === 'applyExpert' || view === 'applyProvider') {
+    identityAuditOpen.value = true
+  }
   if (view === 'announcementManage' || view === 'postManage') {
     contentManageOpen.value = true
   }
@@ -106,6 +128,9 @@ const handleSwitch = (view) => {
 
 const toggleContentManage = () => {
   contentManageOpen.value = !contentManageOpen.value
+}
+const toggleIdentityAudit = () => {
+  identityAuditOpen.value = !identityAuditOpen.value
 }
 </script>
 
