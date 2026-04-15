@@ -3,6 +3,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.http import JsonResponse
 from .models import User, Post, ExpertApplication, PostHistory, Task, PointTransaction, Announcement, ChatMessage
 from django.utils.timezone import now
+from datetime import timedelta
 from math import radians, cos, sin, asin, sqrt
 from .models import CommunityTask
 from django.db import transaction
@@ -11,6 +12,45 @@ from django.http import JsonResponse
 from django.views.decorators.http import require_POST
 #from .models import Task, PointTransaction, User
 import json
+
+
+AUTO_ACCEPT_MINUTES = 5
+
+
+def auto_finish_overdue_submitted_tasks():
+    """自动验收：submitted 超过 5 分钟未处理则自动完成并发放积分。"""
+    cutoff = now() - timedelta(minutes=AUTO_ACCEPT_MINUTES)
+    overdue_ids = list(
+        Task.objects.filter(
+            status='submitted',
+            worker__isnull=False,
+            submitted_at__isnull=False,
+            submitted_at__lte=cutoff
+        ).values_list('id', flat=True)[:200]
+    )
+    for task_id in overdue_ids:
+        try:
+            with transaction.atomic():
+                task = Task.objects.select_for_update().select_related('worker').get(id=task_id)
+                if task.status != 'submitted' or not task.worker:
+                    continue
+                if not task.submitted_at or task.submitted_at > cutoff:
+                    continue
+
+                worker = task.worker
+                worker.points = F('points') + task.reward_points
+                worker.save(update_fields=['points'])
+
+                PointTransaction.objects.create(
+                    user=worker,
+                    change=task.reward_points,
+                    reason=f'任务超时自动验收发放积分：{task.title}'
+                )
+
+                task.status = 'finished'
+                task.save(update_fields=['status', 'updated_at'])
+        except Task.DoesNotExist:
+            continue
 
 
 # 登录接口
@@ -709,19 +749,40 @@ def my_application_history(request):
 @csrf_exempt
 def get_tasks(request):
     """获取所有待接单的任务"""
-    # 只展示状态为 pending（招募中）的任务
-    tasks = Task.objects.filter(status='pending').order_by('-created_at')
+    category = request.GET.get('category')
+    user_lat = request.GET.get('user_lat')
+    user_lng = request.GET.get('user_lng')
+
+    tasks = Task.objects.filter(status='pending')
+    if category and category != 'all':
+        tasks = tasks.filter(category=category)
+
+    tasks = tasks.order_by('-created_at')
     task_list = []
     for t in tasks:
+        distance_km = None
+        if user_lat and user_lng and t.latitude is not None and t.longitude is not None:
+            try:
+                distance_km = round(haversine_distance(user_lat, user_lng, t.latitude, t.longitude), 2)
+            except Exception:
+                distance_km = None
+
         task_list.append({
             'id': t.id,
             'title': t.title,
             'category': t.category,
             'content': t.content,
             'reward_points': t.reward_points,
+            'community_zone': t.community_zone,
+            'distance_km': distance_km,
             'creator': t.creator.username,
             'created_at': t.created_at.strftime('%Y-%m-%d %H:%M')
         })
+
+    if user_lat and user_lng:
+        # 有距离信息的任务优先，按距离升序；无距离的排后面
+        task_list.sort(key=lambda x: (x['distance_km'] is None, x['distance_km'] if x['distance_km'] is not None else 999999))
+
     return JsonResponse({'code': 200, 'tasks': task_list})
 
 
@@ -754,6 +815,16 @@ def create_task(request):
             if user.points < reward_points:
                 return JsonResponse({'code': 400, 'message': '积分不足，无法发布该任务'})
 
+            latitude = data.get('latitude')
+            longitude = data.get('longitude')
+            community_zone = data.get('community_zone')
+
+            if not community_zone and latitude is not None and longitude is not None:
+                try:
+                    community_zone = f"约 {float(latitude):.2f}, {float(longitude):.2f} 附近"
+                except Exception:
+                    community_zone = None
+
             with transaction.atomic():
                 user.points = F('points') - reward_points
                 user.save(update_fields=['points'])
@@ -764,6 +835,9 @@ def create_task(request):
                     content=data.get('content'),
                     category=data.get('category'),
                     reward_points=reward_points,
+                    community_zone=community_zone,
+                    latitude=latitude if latitude not in ['', None] else None,
+                    longitude=longitude if longitude not in ['', None] else None,
                     creator=user,
                     status='auditing'
                 )
@@ -801,13 +875,17 @@ def accept_task(request):
         # 更新任务状态和接单人
         task.worker = worker_user
         task.status = 'accepted'
-        task.save()
+        task.accepted_at = now()
+        task.submitted_at = None
+        task.save(update_fields=['worker', 'status', 'accepted_at', 'submitted_at', 'updated_at'])
         return JsonResponse({'code': 200, 'message': '接单成功！'})
 
 
 @csrf_exempt
 def get_my_tasks(request):
     """获取与当前用户相关的任务"""
+    auto_finish_overdue_submitted_tasks()
+
     username = request.GET.get('username')
     user = User.objects.get(username=username)
 
@@ -818,6 +896,7 @@ def get_my_tasks(request):
 
     # 序列化逻辑（建议封装成函数，这里为了演示直接写）
     def serialize(queryset):
+        auto_cutoff = timedelta(minutes=AUTO_ACCEPT_MINUTES)
         return [{
             'id': t.id,
             'title': t.title,
@@ -829,6 +908,10 @@ def get_my_tasks(request):
             'reward_points': t.reward_points,
             'result_desc': t.result_desc,
             'abandon_reason': t.abandon_reason,
+            'accepted_at': t.accepted_at.strftime('%Y-%m-%d %H:%M:%S') if t.accepted_at else None,
+            'submitted_at': t.submitted_at.strftime('%Y-%m-%d %H:%M:%S') if t.submitted_at else None,
+            'auto_accept_deadline': (t.submitted_at + auto_cutoff).strftime('%Y-%m-%d %H:%M:%S')
+            if t.status == 'submitted' and t.submitted_at else None,
             'created_at': t.created_at.strftime('%Y-%m-%d %H:%M')
         } for t in queryset]
 
@@ -848,7 +931,8 @@ def submit_task(request):
             task = Task.objects.get(id=data.get('taskId'))
             task.status = 'submitted'  # 变更状态为：已提交(待确认)
             task.result_desc = data.get('desc')
-            task.save()
+            task.submitted_at = now()
+            task.save(update_fields=['status', 'result_desc', 'submitted_at', 'updated_at'])
             return JsonResponse({'code': 200, 'message': '提交成功'})
         except Task.DoesNotExist:
             return JsonResponse({'code': 404, 'message': '任务不存在'})
@@ -867,8 +951,10 @@ def abandon_task(request):
             # 🚀 核心逻辑：清空接单人，将状态重置为招募中
             task.worker = None
             task.status = 'pending'
+            task.accepted_at = None
+            task.submitted_at = None
 
-            task.save()
+            task.save(update_fields=['abandon_reason', 'worker', 'status', 'accepted_at', 'submitted_at', 'updated_at'])
             return JsonResponse({'code': 200, 'message': '已放弃任务，任务已重回市场'})
         except Task.DoesNotExist:
             return JsonResponse({'code': 404, 'message': '任务不存在'})
@@ -884,6 +970,9 @@ def finish_task(request):
         try:
             with transaction.atomic():
                 task = Task.objects.select_for_update().get(id=data.get('task_id'))
+
+                if task.status == 'finished':
+                    return JsonResponse({'code': 200, 'message': '该任务已完成，无需重复确认'})
 
                 if task.status != 'submitted':
                     return JsonResponse({'code': 400, 'message': '当前状态不可确认结项'})
@@ -928,6 +1017,8 @@ from .models import Task, User
 @csrf_exempt
 def get_audit_tasks(request):
     """管理员专用：获取待初审(auditing)和待复审(intervention)的任务"""
+    auto_finish_overdue_submitted_tasks()
+
     # 只要是需要管理员操心的，全查出来
     tasks = Task.objects.filter(status__in=['auditing', 'intervention']).order_by('-created_at')
 
@@ -1017,6 +1108,8 @@ def admin_handle_review(request):
                     # 判定用户胜诉：任务回退到招募中，或直接撤销
                     task.status = 'pending'
                     task.worker = None  # 踢掉当前的接单达人
+                    task.accepted_at = None
+                    task.submitted_at = None
 
             task.save()
             return JsonResponse({'code': 200, 'message': '审批操作已记录'})
@@ -1028,6 +1121,8 @@ def admin_handle_review(request):
 @csrf_exempt
 def get_admin_all_tasks(request):
     """管理员获取所有参与过审核或仲裁的任务"""
+    auto_finish_overdue_submitted_tasks()
+
     # 排除掉还在“招募中”或“进行中”且未发生争议的任务，只看跟管理员有关的
     tasks = Task.objects.exclude(status='accepted').order_by('-created_at')
 

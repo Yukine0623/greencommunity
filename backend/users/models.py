@@ -95,6 +95,9 @@ class Task(models.Model):
 
     # 2. 🚀 积分悬赏：发布时扣除/预留多少分
     reward_points = models.IntegerField(default=0, verbose_name="悬赏积分")
+    community_zone = models.CharField(max_length=50, null=True, blank=True, verbose_name="社区片区")
+    latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True, verbose_name="纬度")
+    longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True, verbose_name="经度")
 
     # 3. 关联角色
     creator = models.ForeignKey(User, on_delete=models.CASCADE, related_name='created_tasks')
@@ -120,6 +123,8 @@ class Task(models.Model):
 
     # 7. 时间戳
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+    accepted_at = models.DateTimeField(null=True, blank=True, verbose_name="接单时间")
+    submitted_at = models.DateTimeField(null=True, blank=True, verbose_name="提交成果时间")
     # 🚀 增加这个字段：每次 save() 时自动更新，用于记录“处理时间”
     updated_at = models.DateTimeField(auto_now=True, verbose_name="最后更新时间")
 

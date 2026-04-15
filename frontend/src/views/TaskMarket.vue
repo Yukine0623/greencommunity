@@ -1,12 +1,21 @@
 <template>
   <div class="task-market-container">
     <header class="market-header glass-card">
-      <div class="header-left">
-        <h1>任务市场</h1>
-        <p class="subtitle">发现身边的邻里互助需求</p>
-      </div>
-      
-      <div class="header-right">
+      <h1>任务市场</h1>
+      <p class="subtitle">发现身边的邻里互助需求</p>
+      <div class="header-controls">
+        <select v-model="selectedCategory" class="category-filter" @change="fetchTasks">
+          <option value="all">全部类型</option>
+          <option value="errand">跑腿代购</option>
+          <option value="repair">家电维修</option>
+          <option value="pet">宠物照顾</option>
+          <option value="other">其他互助</option>
+        </select>
+        <select v-model="sortType" class="category-filter">
+          <option value="created_desc">按发布时间（新到旧）</option>
+          <option value="reward_desc">按积分（高到低）</option>
+          <option value="distance_asc">按距离（近到远）</option>
+        </select>
         <div class="search-bar">
           <span class="search-icon">🔍</span>
           <input v-model="searchQuery" placeholder="搜索任务标题..." />
@@ -29,6 +38,11 @@
             <h3 class="card-title">{{ task.title }}</h3>
           </div>
           <p class="card-desc">{{ task.content }}</p>
+          <p class="distance-line">
+            <span v-if="task.distance_km !== null && task.distance_km !== undefined">📍 距你 {{ task.distance_km }} km</span>
+            <span v-else>📍 距离未知</span>
+            <span v-if="task.community_zone"> · {{ task.community_zone }}</span>
+          </p>
         </div>
 
         <div class="card-footer">
@@ -86,6 +100,28 @@
               />
               <small class="form-tip">发布后会先冻结这部分积分，任务完成后发放给接单者。</small>
             </div>
+
+            <div class="form-item">
+              <label>任务位置（可选）</label>
+              <div class="location-actions">
+                <button class="btn-location" type="button" @click="handleGetPublishLocation">获取当前位置</button>
+                <button
+                  v-if="publishLocation.latitude && publishLocation.longitude"
+                  class="btn-location-clear"
+                  type="button"
+                  @click="clearPublishLocation"
+                >
+                  清除位置
+                </button>
+              </div>
+              <small class="form-tip">可不填写。填写后会用于任务距离计算与附近排序。</small>
+              <small
+                v-if="publishLocation.latitude && publishLocation.longitude"
+                class="location-value"
+              >
+                已获取：{{ publishLocation.latitude }}, {{ publishLocation.longitude }}
+              </small>
+            </div>
             
             <button class="btn-submit-task" @click="submitTask">立即发布</button>
           </div>
@@ -118,12 +154,64 @@ const showModal = ref(false)
 const showDetailModal = ref(false)
 const currentTask = ref({})
 const searchQuery = ref('')
+const selectedCategory = ref('all')
+const sortType = ref('created_desc')
+const userLocation = ref({
+  latitude: null,
+  longitude: null
+})
+const publishLocation = ref({
+  latitude: null,
+  longitude: null
+})
 const newTask = ref({ title: '', category: 'errand', content: '', reward_points: 10 })
 
 // 接口逻辑
+const getCurrentLocation = () => {
+  return new Promise((resolve) => {
+    if (!navigator.geolocation) return resolve(false)
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        userLocation.value.latitude = Number(pos.coords.latitude.toFixed(6))
+        userLocation.value.longitude = Number(pos.coords.longitude.toFixed(6))
+        resolve(true)
+      },
+      () => resolve(false),
+      { enableHighAccuracy: false, timeout: 8000, maximumAge: 300000 }
+    )
+  })
+}
+const handleGetPublishLocation = () => {
+  if (!navigator.geolocation) {
+    alert('当前浏览器不支持定位')
+    return
+  }
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      publishLocation.value.latitude = Number(pos.coords.latitude.toFixed(6))
+      publishLocation.value.longitude = Number(pos.coords.longitude.toFixed(6))
+    },
+    () => {
+      alert('定位失败，请检查浏览器定位权限')
+    },
+    { enableHighAccuracy: false, timeout: 8000, maximumAge: 300000 }
+  )
+}
+const clearPublishLocation = () => {
+  publishLocation.value.latitude = null
+  publishLocation.value.longitude = null
+}
+
 const fetchTasks = async () => {
   try {
-    const res = await axios.get('http://127.0.0.1:8000/api/get_tasks/')
+    const params = {
+      category: selectedCategory.value
+    }
+    if (userLocation.value.latitude && userLocation.value.longitude) {
+      params.user_lat = userLocation.value.latitude
+      params.user_lng = userLocation.value.longitude
+    }
+    const res = await axios.get('http://127.0.0.1:8000/api/get_tasks/', { params })
     tasks.value = res.data.tasks || []
   } catch (err) {
     console.error("加载数据失败", err)
@@ -143,6 +231,8 @@ const submitTask = async () => {
       content: newTask.value.content,
       category: newTask.value.category,
       reward_points: Number(newTask.value.reward_points || 10),
+      latitude: publishLocation.value.latitude,
+      longitude: publishLocation.value.longitude,
       username: username.value  // 👈 重点：这里的 Key 必须叫 username
     });
 
@@ -154,6 +244,7 @@ const submitTask = async () => {
     // 2. 关闭弹窗并重置表单
     showModal.value = false;
     newTask.value = { title: '', category: 'errand', content: '', reward_points: 10 };
+    clearPublishLocation()
     
     // 3. 刷新列表（此时新任务在审核中，大厅列表依然不显示它是正常的）
     fetchTasks(); 
@@ -193,13 +284,34 @@ const detailRows = computed(() => {
   ]
 })
 
-onMounted(() => fetchTasks())
+onMounted(async () => {
+  await getCurrentLocation()
+  fetchTasks()
+})
 
 // 计算过滤
 const filteredTasks = computed(() => {
-  return tasks.value.filter(t => 
+  const list = tasks.value.filter(t =>
     t.title.toLowerCase().includes(searchQuery.value.toLowerCase())
   )
+
+  const sorted = [...list]
+  if (sortType.value === 'reward_desc') {
+    sorted.sort((a, b) => (b.reward_points || 0) - (a.reward_points || 0))
+  } else if (sortType.value === 'distance_asc') {
+    sorted.sort((a, b) => {
+      const ad = a.distance_km
+      const bd = b.distance_km
+      if (ad == null && bd == null) return 0
+      if (ad == null) return 1
+      if (bd == null) return -1
+      return ad - bd
+    })
+  } else {
+    sorted.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+  }
+
+  return sorted
 })
 
 const formatCategory = (cat) => {
@@ -226,22 +338,35 @@ const formatCategory = (cat) => {
 
 /* 2. 头部风格 */
 .market-header {
-  display: flex; justify-content: space-between; align-items: center;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 14px;
   padding: 30px 45px; margin-bottom: 35px;
 }
 .market-header h1 { font-size: 28px; color: #2d3748; margin: 0; }
-.subtitle { color: #718096; margin-top: 6px; font-size: 14px; }
-.header-right {
+.subtitle { color: #718096; margin: 0; font-size: 14px; }
+.header-controls {
   display: flex;
   align-items: center;
+  gap: 12px;
+  width: 100%;
 }
 
-.search-bar { position: relative; }
+.search-bar { position: relative; flex: 1; min-width: 260px; }
 .search-bar input {
-  padding: 12px 20px 12px 45px; border-radius: 30px; border: 1px solid #e2e8f0; width: 320px; outline: none; transition: 0.3s;
+  padding: 12px 20px 12px 45px; border-radius: 30px; border: 1px solid #e2e8f0; width: 100%; outline: none; transition: 0.3s;
 }
 .search-bar input:focus { border-color: #4299e1; box-shadow: 0 0 0 3px rgba(66, 153, 225, 0.1); }
 .search-icon { position: absolute; left: 18px; top: 12px; color: #a0aec0; }
+.category-filter {
+  border: 1px solid #e2e8f0;
+  border-radius: 30px;
+  padding: 11px 14px;
+  background: white;
+  color: #4a5568;
+  outline: none;
+}
 
 .btn-add-task-fab {
   width: 52px; height: 52px; border-radius: 50%; background: #4299e1; color: white;
@@ -285,6 +410,11 @@ const formatCategory = (cat) => {
   color: #4a5568; font-size: 14px; line-height: 1.7; height: 72px;
   display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
 }
+.distance-line {
+  margin: 6px 0 0;
+  color: #718096;
+  font-size: 13px;
+}
 
 .card-footer { border-top: 1px solid #f1f5f9; padding-top: 18px; margin-top: 10px; }
 .action-group { display: flex; gap: 12px; justify-content: flex-end; }
@@ -295,8 +425,15 @@ const formatCategory = (cat) => {
 .modal-overlay {
   position: fixed; inset: 0; background: rgba(10, 25, 47, 0.6);
   backdrop-filter: blur(8px); display: flex; align-items: center; justify-content: center; z-index: 2000;
+  padding: 16px;
 }
-.task-modal { width: 520px; padding: 40px; position: relative; }
+.task-modal {
+  width: 520px;
+  padding: 40px;
+  position: relative;
+  max-height: 90vh;
+  overflow-y: auto;
+}
 .modal-title { text-align: center; margin-bottom: 30px; color: #2d3748; }
 
 .form-item {
@@ -310,6 +447,31 @@ const formatCategory = (cat) => {
 .form-item input:focus, .form-item textarea:focus { border-color: #4299e1; background: white; }
 .form-item textarea { height: 130px; resize: none; }
 .form-tip { color: #718096; font-size: 12px; line-height: 1.5; }
+.location-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.btn-location,
+.btn-location-clear {
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  background: white;
+  color: #334155;
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+}
+.btn-location-clear {
+  border-color: #fecaca;
+  color: #b91c1c;
+  background: #fff1f2;
+}
+.location-value {
+  color: #0f766e;
+  font-size: 12px;
+}
 
 .btn-submit-task {
   width: 100%; padding: 15px; background: #4299e1; color: white; border: none; border-radius: 14px;

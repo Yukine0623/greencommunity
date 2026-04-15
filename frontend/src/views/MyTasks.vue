@@ -293,7 +293,7 @@ const handleConfirmFinish = async (id) => {
   }
 }
 const canOpenChat = (task) => {
-  return !!task.worker && ['accepted', 'submitted', 'finished', 'intervention'].includes(task.status)
+  return !!task.worker && ['accepted', 'submitted', 'intervention'].includes(task.status)
 }
 const scrollChatBottom = async () => {
   await nextTick()
@@ -339,6 +339,10 @@ const stopChatPolling = () => {
   }
 }
 const openChatModal = async (task) => {
+  if (!canOpenChat(task)) {
+    alert('任务已完成，聊天已关闭')
+    return
+  }
   chatTask.value = task
   chatMessages.value = []
   lastChatId.value = 0
@@ -356,6 +360,11 @@ const closeChatModal = () => {
 }
 const sendChatMessage = async () => {
   if (!chatTask.value?.id || !chatInput.value.trim()) return
+  if (!canOpenChat(chatTask.value)) {
+    alert('任务已完成，无法继续发送消息')
+    closeChatModal()
+    return
+  }
   try {
     const res = await axios.post('http://127.0.0.1:8000/api/chat/send/', {
       task_id: chatTask.value.id,
@@ -468,9 +477,9 @@ onUnmounted(() => stopChatPolling())
 .btn-abandon { background: #fff5f5; color: #e53e3e; border: 1px solid #feb2b2; padding: 8px 18px; border-radius: 8px; cursor: pointer; }
 .btn-detail { background: #f7fafc; color: #4a5568; border: 1px solid #e2e8f0; padding: 8px 18px; border-radius: 8px; cursor: pointer; }
 
-.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; z-index: 9999; }
-.mini-modal { width: 450px; padding: 35px; }
-.chat-modal { width: 640px; max-width: 94vw; padding: 24px; }
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; z-index: 9999; padding: 16px; }
+.mini-modal { width: 450px; padding: 35px; max-height: 90vh; overflow-y: auto; }
+.chat-modal { width: 640px; max-width: 94vw; padding: 24px; max-height: 90vh; overflow: hidden; display: flex; flex-direction: column; }
 .chat-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
 .chat-header h3 { margin: 0; color: #2d3748; }
 .detail-close { background: transparent; border: none; font-size: 26px; color: #718096; cursor: pointer; line-height: 1; }

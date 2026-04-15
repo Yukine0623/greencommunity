@@ -96,10 +96,15 @@ const formatValue = (value) => {
   align-items: center;
   justify-content: center;
   z-index: 9999;
+  padding: 16px;
 }
 
 .detail-modal {
   padding: 30px;
+  max-height: 90vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .detail-header {
@@ -127,7 +132,7 @@ const formatValue = (value) => {
   display: flex;
   flex-direction: column;
   gap: 14px;
-  max-height: 60vh;
+  max-height: 64vh;
   overflow-y: auto;
 }
 

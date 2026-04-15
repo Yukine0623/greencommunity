@@ -452,6 +452,8 @@ onMounted(async () => {
   box-shadow: 0 20px 50px rgba(0,0,0,0.15); 
   position: relative;
   border: 1px solid rgba(255, 255, 255, 0.5);
+  max-height: 90vh;
+  overflow-y: auto;
 }
 
 .modal-header h2 { font-size: 24px; color: #1a365d; text-align: center; margin-bottom: 20px; }
@@ -486,6 +488,7 @@ onMounted(async () => {
   align-items: center; 
   justify-content: center; 
   z-index: 1000; 
+  padding: 16px;
 }
 
 .close-x { position: absolute; right: 25px; top: 25px; background: none; border: none; font-size: 24px; cursor: pointer; color: #a0aec0; transition: color 0.2s; }

@@ -705,6 +705,7 @@ onMounted(refreshData)
   align-items: center;
   justify-content: center;
   z-index: 9999 !important;
+  padding: 16px;
 }
 
 /* ============================================================
@@ -719,6 +720,7 @@ onMounted(refreshData)
   flex-direction: column;
   overflow: hidden; /* 防止内容溢出圆角 */
   transition: all 0.3s ease;
+  max-height: 90vh;
 }
 
 /* --- 变体 B：任务审批弹窗 (精简紧致) --- */
