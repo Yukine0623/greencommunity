@@ -17,6 +17,14 @@
       
       <div 
         class="nav-item" 
+        :class="{ active: currentActive === 'dashboard' }"
+        @click="handleSwitch('dashboard')"
+      >
+        <span class="icon">📊</span> 运营仪表盘
+      </div>
+
+      <div 
+        class="nav-item" 
         :class="{ active: currentActive === 'users' }"
         @click="handleSwitch('users')"
       >
@@ -102,7 +110,7 @@ const emit = defineEmits(['switchView'])
 const router = useRouter()
 
 // 🚀 核心：统一使用 currentActive 记录当前激活的菜单项
-const currentActive = ref('users')
+const currentActive = ref('dashboard')
 const contentManageOpen = ref(false)
 const identityAuditOpen = ref(false)
 const isContentManageActive = computed(() => ['announcementManage', 'postManage'].includes(currentActive.value))
@@ -150,6 +158,8 @@ const toggleIdentityAudit = () => {
   left: 0;
   top: 0;
   z-index: 100;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 /* 管理员信息区 */
@@ -199,6 +209,7 @@ const toggleIdentityAudit = () => {
 /* 导航菜单区 */
 .nav-menu {
   flex: 1;
+  min-height: 0;
   padding: 25px 15px;
   display: flex;
   flex-direction: column;

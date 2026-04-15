@@ -41,6 +41,9 @@
         <router-link to="/mytasks" class="sub-nav-item" active-class="active-sub">
           <span class="icon">📋</span> 我的任务
         </router-link>
+        <router-link to="/providers" class="sub-nav-item" active-class="active-sub">
+          <span class="icon">🧰</span> 认证服务者
+        </router-link>
       </div>
 
       <router-link to="/forum" class="nav-item" active-class="active">
@@ -68,12 +71,12 @@ const router = useRouter()
 const route = useRoute()
 
 const taskCenterOpen = ref(false)
-const isTaskRoute = computed(() => ['/tasks', '/mytasks'].includes(route.path))
+const isTaskRoute = computed(() => ['/tasks', '/mytasks', '/providers'].includes(route.path))
 
 watch(
   () => route.path,
   (path) => {
-    if (path === '/tasks' || path === '/mytasks') {
+    if (path === '/tasks' || path === '/mytasks' || path === '/providers') {
       taskCenterOpen.value = true
     }
   },
@@ -108,6 +111,8 @@ const handleLogout = () => {
   left: 0;
   top: 0;
   z-index: 100;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 /* 用户信息区：略微透亮的背景 */
@@ -156,6 +161,7 @@ const handleLogout = () => {
 /* 菜单列表 */
 .nav-menu {
   flex: 1;
+  min-height: 0;
   padding: 25px 15px;
   display: flex;
   flex-direction: column;

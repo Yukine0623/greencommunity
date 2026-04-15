@@ -1,0 +1,45 @@
+:root {
+  --app-font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  --title-1-size: 32px;
+  --title-2-size: 16px;
+  --title-1-color: #111827;
+  --title-2-color: #6b7280;
+}
+
+body,
+button,
+input,
+textarea,
+select {
+  font-family: var(--app-font-family);
+}
+
+:where(.content-header h1, .market-header h1, .providers-header h1, .page-header h1) {
+  margin: 0;
+  font-size: var(--title-1-size);
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--title-1-color);
+}
+
+:where(.content-header .subtitle, .market-header .subtitle, .providers-header p, .page-header .subtitle) {
+  margin: 8px 0 0;
+  font-size: var(--title-2-size);
+  line-height: 1.4;
+  color: var(--title-2-color);
+}
+
+:where(.login-card h2, .register-card h2) {
+  margin-bottom: 1.5rem;
+  font-size: var(--title-1-size);
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--title-1-color);
+}
+
+@media (max-width: 1200px) {
+  :root {
+    --title-1-size: 28px;
+    --title-2-size: 15px;
+  }
+}

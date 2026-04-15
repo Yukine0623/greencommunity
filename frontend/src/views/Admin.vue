@@ -10,7 +10,7 @@
         </div>
       </header>
 
-      <div v-if="!['applyExpert', 'applyProvider', 'taskAudit'].includes(currentView)" class="glass-card filter-bar">
+      <div v-if="!['dashboard', 'applyExpert', 'applyProvider', 'taskAudit', 'announcementManage'].includes(currentView)" class="glass-card filter-bar">
         <div class="search-input">
           <span class="icon">🔍</span>
           <input v-model="searchName" :placeholder="searchPlaceholder" />
@@ -36,31 +36,209 @@
       </div>
 
       <Transition name="fade-slide" mode="out-in">
-        <div class="glass-card table-card" v-if="currentView === 'users'" key="users">
-          <div class="card-header"><h3>活跃用户清单 ({{ filteredUsers.length }})</h3></div>
-          <div class="table-wrapper">
-            <table class="custom-table">
-              <thead>
-                <tr><th>用户标识</th><th>账户名</th><th>职能角色</th><th>积分</th><th>注册日期</th><th class="center">操作</th></tr>
-              </thead>
-              <tbody>
-                <tr v-for="user in paginatedUsers" :key="user.id">
-                  <td class="id-col">#{{ user.id }}</td>
-                  <td class="name-col">{{ user.username }}</td>
-                  <td><span :class="['role-badge', user.role]">{{ formatUserRole(user) }}</span></td>
-                  <td><span class="points-text">🪙 {{ user.points || 0 }}</span></td>
-                  <td class="time-col">{{ user.created_at }}</td>
-                  <td class="center">
-                    <button class="btn-ghost" @click="openPointsPrompt(user)">修改积分</button>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+        <div v-if="currentView === 'dashboard'" key="dashboard" class="dashboard-panels">
+          <div class="glass-card table-card">
+            <div class="card-header">
+              <h3>今日任务总览</h3>
+            </div>
+            <div class="today-kpi-grid">
+              <div class="kpi-card published">
+                <span class="kpi-label">今日发布</span>
+                <span class="kpi-value">{{ todayStats.published || 0 }}</span>
+              </div>
+              <div class="kpi-card finished">
+                <span class="kpi-label">今日完成</span>
+                <span class="kpi-value">{{ todayStats.finished || 0 }}</span>
+              </div>
+              <div class="kpi-card disputed">
+                <span class="kpi-label">今日纠纷</span>
+                <span class="kpi-value">{{ todayStats.disputed || 0 }}</span>
+              </div>
+              <div class="kpi-card terminated">
+                <span class="kpi-label">今日终止</span>
+                <span class="kpi-value">{{ todayStats.terminated || 0 }}</span>
+              </div>
+            </div>
+            <div class="summary-grid">
+              <div class="summary-item">
+                <span>任务总数</span>
+                <strong>{{ dashboardStats.total_tasks || 0 }}</strong>
+              </div>
+              <div class="summary-item">
+                <span>已完成任务</span>
+                <strong>{{ dashboardStats.finished_tasks || 0 }}</strong>
+              </div>
+              <div class="summary-item">
+                <span>已终止任务</span>
+                <strong>{{ dashboardStats.terminated_tasks || 0 }}</strong>
+              </div>
+              <div class="summary-item">
+                <span>当前纠纷中</span>
+                <strong>{{ dashboardStats.dispute_tasks || 0 }}</strong>
+              </div>
+              <div class="summary-item">
+                <span>整体完成率</span>
+                <strong>{{ dashboardStats.completion_rate || 0 }}%</strong>
+              </div>
+            </div>
           </div>
-          <div class="pagination">
-            <button @click="usersPage--" :disabled="usersPage === 1">上一页</button>
-            <span class="page-info">{{ usersPage }} / {{ totalUsersPages }}</span>
-            <button @click="usersPage++" :disabled="usersPage === totalUsersPages">下一页</button>
+
+          <div class="glass-card table-card">
+            <div class="card-header">
+              <h3>近7日发布/完成趋势</h3>
+            </div>
+            <div class="trend-chart">
+              <div
+                v-for="item in dashboardTrend"
+                :key="`trend-${item.date}`"
+                class="trend-col"
+              >
+                <div class="bar-stack">
+                  <div class="bar created" :style="{ height: `${toBarHeight(item.created)}px` }" :title="`发布 ${item.created}`"></div>
+                  <div class="bar finished" :style="{ height: `${toBarHeight(item.finished)}px` }" :title="`完成 ${item.finished}`"></div>
+                </div>
+                <span class="trend-date">{{ item.date }}</span>
+              </div>
+            </div>
+            <div class="trend-legend">
+              <span><i class="dot created"></i>发布</span>
+              <span><i class="dot finished"></i>完成</span>
+            </div>
+          </div>
+
+          <div class="glass-card table-card">
+            <div class="card-header">
+              <h3>任务状态分布</h3>
+            </div>
+            <div class="status-pie-wrap">
+              <div class="status-pie" :style="{ background: statusPieGradient }"></div>
+              <div class="status-pie-legend">
+                <div v-for="item in statusPieItems" :key="`pie-${item.label}`" class="status-pie-legend-item">
+                  <span class="swatch" :style="{ background: item.color }"></span>
+                  <span class="label">{{ item.label }}</span>
+                  <span class="value">{{ item.value }}（{{ item.percent.toFixed(1) }}%）</span>
+                </div>
+              </div>
+            </div>
+            <div class="status-bars">
+              <div v-for="item in statusDistributionRows" :key="`status-${item.label}`" class="status-row">
+                <div class="status-row-head">
+                  <span>{{ item.label }}</span>
+                  <strong>{{ item.value }}</strong>
+                </div>
+                <div class="status-progress">
+                  <div class="status-progress-fill" :style="{ width: `${item.percent}%` }"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div v-else-if="currentView === 'users'" key="users" class="users-view-panels">
+          <div class="glass-card table-card">
+            <div class="card-header"><h3>用户管理 ({{ filteredUsers.length }})</h3></div>
+            <div class="stats-grid">
+              <div class="stat-item">
+                <span class="stat-label">用户总数</span>
+                <span class="stat-value">{{ dashboardStats.total_users || 0 }}</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">任务总数</span>
+                <span class="stat-value">{{ dashboardStats.total_tasks || 0 }}</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">完成率</span>
+                <span class="stat-value">{{ dashboardStats.completion_rate || 0 }}%</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">纠纷任务</span>
+                <span class="stat-value">{{ dashboardStats.dispute_tasks || 0 }}</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">黑名单用户</span>
+                <span class="stat-value">{{ dashboardStats.blacklisted_users || 0 }}</span>
+              </div>
+            </div>
+            <div class="table-wrapper">
+              <table class="custom-table">
+                <thead>
+                  <tr><th>用户标识</th><th>账户名</th><th>职能角色</th><th>积分</th><th>注册日期</th><th class="center">操作</th></tr>
+                </thead>
+                <tbody>
+                  <tr v-for="user in paginatedUsers" :key="user.id">
+                    <td class="id-col">#{{ user.id }}</td>
+                    <td class="name-col">{{ user.username }}</td>
+                    <td><span :class="['role-badge', user.role]">{{ formatUserRole(user) }}</span></td>
+                    <td><span class="points-text">🪙 {{ user.points || 0 }}</span></td>
+                    <td class="time-col">{{ user.created_at }}</td>
+                    <td class="center">
+                      <button class="btn-ghost" @click="openPointsPrompt(user)">修改积分</button>
+                      <button
+                        v-if="!user.is_blacklisted"
+                        class="btn-danger"
+                        style="margin-left:8px;"
+                        @click="blacklistUser(user)"
+                      >
+                        拉黑
+                      </button>
+                      <button
+                        v-else
+                        class="btn-success"
+                        style="margin-left:8px;"
+                        @click="unblacklistUser(user)"
+                      >
+                        解禁
+                      </button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="pagination">
+              <button @click="usersPage--" :disabled="usersPage === 1">上一页</button>
+              <span class="page-info">{{ usersPage }} / {{ totalUsersPages }}</span>
+              <button @click="usersPage++" :disabled="usersPage === totalUsersPages">下一页</button>
+            </div>
+          </div>
+
+          <div class="glass-card table-card">
+            <div class="card-header points-history-header">
+              <h3>积分流水记录</h3>
+              <div class="points-tools">
+                <button class="btn-ghost export-btn" @click="exportPointTransactionsCsv">导出CSV</button>
+                <div class="search-input mini-search points-search">
+                  <span class="icon">🔍</span>
+                  <input v-model="pointTxKeyword" placeholder="搜索用户名或原因..." @keyup.enter="fetchPointTransactions(1)" />
+                </div>
+              </div>
+            </div>
+            <div class="table-wrapper">
+              <table class="custom-table">
+                <thead>
+                  <tr><th>用户</th><th>积分变动</th><th>原因</th><th>时间</th></tr>
+                </thead>
+                <tbody>
+                  <tr v-for="row in pointTransactions" :key="row.id">
+                    <td>{{ row.username }}</td>
+                    <td>
+                      <span :class="['points-change', row.change >= 0 ? 'plus' : 'minus']">
+                        {{ row.change >= 0 ? '+' : '' }}{{ row.change }}
+                      </span>
+                    </td>
+                    <td>{{ row.reason }}</td>
+                    <td>{{ row.created_at }}</td>
+                  </tr>
+                  <tr v-if="pointTransactions.length === 0">
+                    <td colspan="4" class="empty-row">暂无积分流水</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="pagination">
+              <button @click="changePointTxPage(pointTxPage - 1)" :disabled="pointTxPage === 1">上一页</button>
+              <span class="page-info">{{ pointTxPage }} / {{ pointTxTotalPages }}</span>
+              <button @click="changePointTxPage(pointTxPage + 1)" :disabled="pointTxPage === pointTxTotalPages">下一页</button>
+            </div>
           </div>
         </div>
 
@@ -80,14 +258,14 @@
             <div class="table-wrapper">
               <table class="custom-table">
                 <thead>
-                  <tr><th>申请人</th><th>资历描述</th><th>服务范围</th><th>定价参考</th><th>提交时间</th><th class="center">操作</th></tr>
+                  <tr><th>申请人</th><th>资历描述</th><th>服务范围</th><th>价格区间</th><th>提交时间</th><th class="center">操作</th></tr>
                 </thead>
                 <tbody>
                   <tr v-for="item in paginatedPendingApplications" :key="`pending-${item.id}`">
                     <td class="name-col">{{ item.username }}</td>
                     <td class="reason-col">{{ item.reason }}</td>
                     <td>{{ item.service_scope || '-' }}</td>
-                    <td>{{ item.pricing_note || '-' }}</td>
+                    <td>{{ formatApplyPrice(item) }}</td>
                     <td>{{ item.created_at }}</td>
                     <td class="action-cols center">
                       <div class="action-btns">
@@ -127,14 +305,14 @@
             <div class="table-wrapper">
               <table class="custom-table">
                 <thead>
-                  <tr><th>申请人</th><th>资历描述</th><th>服务范围</th><th>定价参考</th><th>状态</th><th>提交时间</th></tr>
+                  <tr><th>申请人</th><th>资历描述</th><th>服务范围</th><th>价格区间</th><th>状态</th><th>提交时间</th></tr>
                 </thead>
                 <tbody>
                   <tr v-for="item in paginatedHistoryApplications" :key="`history-${item.id}`">
                     <td class="name-col">{{ item.username }}</td>
                     <td class="reason-col">{{ item.reason }}</td>
                     <td>{{ item.service_scope || '-' }}</td>
-                    <td>{{ item.pricing_note || '-' }}</td>
+                    <td>{{ formatApplyPrice(item) }}</td>
                     <td><span :class="['status-pill', item.status]">{{ translateStatus(item.status) }}</span></td>
                     <td>{{ item.created_at }}</td>
                   </tr>
@@ -152,55 +330,66 @@
           </div>
         </div>
 
-        <div class="glass-card table-card" v-else-if="currentView === 'announcementManage'" key="announcement-manage">
-          <div class="card-header"><h3>社区公告管理</h3></div>
-          <div class="announcement-admin-panel">
-            <div class="announcement-admin-card">
-              <h4 class="panel-title">发布公告</h4>
-              <div class="announcement-form">
-                <input
-                  v-model="announcementForm.title"
-                  class="announcement-input"
-                  placeholder="公告标题"
-                  maxlength="100"
-                />
-                <textarea
-                  v-model="announcementForm.content"
-                  class="announcement-textarea"
-                  placeholder="公告内容"
-                  maxlength="1000"
-                />
-                <div class="announcement-form-footer">
-                  <button class="btn-primary" @click="publishAnnouncement">发布公告</button>
-                </div>
+        <div v-else-if="currentView === 'announcementManage'" key="announcement-manage" class="announcement-manage-panels">
+          <div class="glass-card table-card">
+            <div class="card-header"><h3>发布公告</h3></div>
+            <div class="announcement-form">
+              <input
+                v-model="announcementForm.title"
+                class="announcement-input"
+                placeholder="公告标题"
+                maxlength="100"
+              />
+              <textarea
+                v-model="announcementForm.content"
+                class="announcement-textarea"
+                placeholder="公告内容"
+                maxlength="1000"
+              />
+              <div class="announcement-form-footer">
+                <button class="btn-primary" @click="publishAnnouncement">发布公告</button>
               </div>
             </div>
+          </div>
 
-            <div class="announcement-admin-card">
-              <h4 class="panel-title">已发布公告</h4>
-              <div class="announcement-list">
-                <div
-                  v-for="item in paginatedAnnouncements"
-                  :key="item.id"
-                  class="announcement-item"
-                >
-                  <div class="announcement-item-header">
-                    <strong>{{ item.title }}</strong>
-                    <span class="announcement-time">{{ item.created_at }}</span>
-                  </div>
-                  <p class="announcement-content">{{ item.content }}</p>
-                  <div class="announcement-item-footer">
-                    <span class="announcement-author">发布人：{{ item.author }}</span>
-                    <button class="btn-danger" @click="deleteAnnouncement(item.id)">删除</button>
-                  </div>
+          <div class="glass-card table-card">
+            <div class="card-header announcement-list-header">
+              <h3>已发布公告</h3>
+              <div class="announcement-tools">
+                <div class="search-input mini-search announcement-search">
+                  <span class="icon">🔍</span>
+                  <input v-model="announcementSearchName" placeholder="搜公告标题或发布人..." />
                 </div>
-                <div v-if="filteredAnnouncements.length === 0" class="announcement-empty">暂无公告</div>
+                <select v-model="announcementAuthorFilter" class="custom-select announcement-author-filter">
+                  <option value="all">全部发布人</option>
+                  <option v-for="name in announcementAuthorOptions" :key="`author-${name}`" :value="name">
+                    {{ name }}
+                  </option>
+                </select>
               </div>
-              <div class="pagination">
-                <button @click="announcementsPage--" :disabled="announcementsPage === 1">上一页</button>
-                <span class="page-info">{{ announcementsPage }} / {{ totalAnnouncementsPages }}</span>
-                <button @click="announcementsPage++" :disabled="announcementsPage === totalAnnouncementsPages">下一页</button>
+            </div>
+            <div class="announcement-list">
+              <div
+                v-for="item in paginatedAnnouncements"
+                :key="item.id"
+                class="announcement-item"
+              >
+                <div class="announcement-item-header">
+                  <strong>{{ item.title }}</strong>
+                  <span class="announcement-time">{{ item.created_at }}</span>
+                </div>
+                <p class="announcement-content">{{ item.content }}</p>
+                <div class="announcement-item-footer">
+                  <span class="announcement-author">发布人：{{ item.author }}</span>
+                  <button class="btn-danger" @click="deleteAnnouncement(item.id)">删除</button>
+                </div>
               </div>
+              <div v-if="filteredAnnouncements.length === 0" class="announcement-empty">暂无公告</div>
+            </div>
+            <div class="pagination">
+              <button @click="announcementsPage--" :disabled="announcementsPage === 1">上一页</button>
+              <span class="page-info">{{ announcementsPage }} / {{ totalAnnouncementsPages }}</span>
+              <button @click="announcementsPage++" :disabled="announcementsPage === totalAnnouncementsPages">下一页</button>
             </div>
           </div>
         </div>
@@ -459,8 +648,10 @@ const userStore = useUserStore()
 
 // --- 状态定义 ---
 const adminName = computed(() => userStore.username)
-const currentView = ref('users')
+const currentView = ref('dashboard')
 const searchName = ref('')
+const announcementSearchName = ref('')
+const announcementAuthorFilter = ref('all')
 const pendingSearchName = ref('')
 const historySearchName = ref('')
 const initialTaskSearchName = ref('')
@@ -477,6 +668,10 @@ const postsPage = ref(1)
 const initialTasksPage = ref(1)
 const recheckTasksPage = ref(1)
 const terminationTasksPage = ref(1)
+const pointTxPage = ref(1)
+const pointTxPageSize = 8
+const pointTxTotalPages = ref(1)
+const pointTxKeyword = ref('')
 
 const users = ref([])
 const applications = ref([])
@@ -484,6 +679,11 @@ const auditPosts = ref([])
 const auditHistory = ref([])
 const auditTasks = ref([])
 const adminAnnouncements = ref([])
+const dashboardStats = ref({})
+const todayStats = ref({})
+const dashboardTrend = ref([])
+const dashboardStatusDistribution = ref({})
+const pointTransactions = ref([])
 const announcementForm = ref({
   title: '',
   content: ''
@@ -510,6 +710,7 @@ const terminationSettlement = ref({
 // --- 计算属性 ---
 const viewTitle = computed(() => {
   const titles = {
+    dashboard: '运营仪表盘',
     users: '用户管理系统',
     applyExpert: '社区身份审核 / 邻里达人',
     applyProvider: '社区身份审核 / 认证服务者',
@@ -522,9 +723,51 @@ const viewTitle = computed(() => {
 
 const searchPlaceholder = computed(() => {
   if (currentView.value === 'users') return '搜索用户名...'
-  if (currentView.value === 'announcementManage') return '搜公告标题或发布人...'
   if (currentView.value === 'postManage') return '搜标题、内容或作者...'
   return '搜索关键词或发起人...'
+})
+const trendMax = computed(() => {
+  const maxValue = Math.max(
+    1,
+    ...dashboardTrend.value.map((item) => Math.max(Number(item.created) || 0, Number(item.finished) || 0))
+  )
+  return maxValue
+})
+const toBarHeight = (value) => {
+  const safeValue = Number(value) || 0
+  return Math.max(6, Math.round((safeValue / trendMax.value) * 110))
+}
+const statusDistributionRows = computed(() => {
+  const source = dashboardStatusDistribution.value || {}
+  const total = Object.values(source).reduce((sum, current) => sum + (Number(current) || 0), 0)
+  return Object.entries(source).map(([label, raw]) => {
+    const value = Number(raw) || 0
+    const percent = total > 0 ? Number(((value / total) * 100).toFixed(2)) : 0
+    return { label, value, percent }
+  })
+})
+const statusPiePalette = ['#34d399', '#60a5fa', '#fbbf24', '#f87171', '#a78bfa', '#22d3ee', '#94a3b8']
+const statusPieItems = computed(() => {
+  return statusDistributionRows.value.map((item, idx) => ({
+    ...item,
+    color: statusPiePalette[idx % statusPiePalette.length]
+  }))
+})
+const statusPieGradient = computed(() => {
+  if (!statusPieItems.value.length) {
+    return 'conic-gradient(#e2e8f0 0deg 360deg)'
+  }
+  let start = 0
+  const segments = statusPieItems.value.map((item) => {
+    const end = start + (item.percent / 100) * 360
+    const seg = `${item.color} ${start.toFixed(2)}deg ${end.toFixed(2)}deg`
+    start = end
+    return seg
+  })
+  if (start < 360) {
+    segments.push(`#e2e8f0 ${start.toFixed(2)}deg 360deg`)
+  }
+  return `conic-gradient(${segments.join(', ')})`
 })
 
 const currentApplyType = computed(() => (currentView.value === 'applyProvider' ? 'provider' : 'expert'))
@@ -618,9 +861,19 @@ const historyApplications = computed(() => {
 const paginatedHistoryApplications = computed(() => paginate(historyApplications.value, historyAppsPage.value))
 const totalHistoryAppsPages = computed(() => totalPagesOf(historyApplications.value))
 
+const announcementAuthorOptions = computed(() => {
+  const set = new Set()
+  adminAnnouncements.value.forEach((item) => {
+    if (item.author) set.add(item.author)
+  })
+  return Array.from(set)
+})
 const filteredAnnouncements = computed(() => {
+  const q = announcementSearchName.value.toLowerCase().trim()
   return adminAnnouncements.value.filter((item) => {
-    return item.title.includes(searchName.value) || item.author.includes(searchName.value)
+    const matchedSearch = !q || item.title.toLowerCase().includes(q) || item.author.toLowerCase().includes(q)
+    const matchedAuthor = announcementAuthorFilter.value === 'all' || item.author === announcementAuthorFilter.value
+    return matchedSearch && matchedAuthor
   })
 })
 const paginatedAnnouncements = computed(() => paginate(filteredAnnouncements.value, announcementsPage.value))
@@ -734,10 +987,21 @@ watch(terminationAuditTasks, () => {
   terminationTasksPage.value = 1
 })
 watch(totalTerminationTasksPages, () => clampPage(terminationTasksPage, totalTerminationTasksPages))
+watch(pointTxKeyword, () => {
+  if (currentView.value !== 'users') return
+  fetchPointTransactions(1)
+})
 
 // --- API 方法 ---
 const refreshData = () => {
-  if (currentView.value === 'users') fetchUsers()
+  if (currentView.value === 'dashboard') {
+    fetchDashboardStats()
+  }
+  if (currentView.value === 'users') {
+    fetchUsers()
+    fetchDashboardStats()
+    fetchPointTransactions(1)
+  }
   if (currentView.value === 'applyExpert' || currentView.value === 'applyProvider') fetchApplications()
   if (currentView.value === 'announcementManage') fetchAnnouncements()
   if (currentView.value === 'postManage') { fetchAuditPosts(); fetchAuditHistory() }
@@ -753,15 +1017,65 @@ const fetchAnnouncements = async () => {
   const res = await axios.get('http://127.0.0.1:8000/api/announcements/')
   adminAnnouncements.value = res.data.announcements || []
 }
+const fetchDashboardStats = async () => {
+  try {
+    const res = await axios.get('http://127.0.0.1:8000/api/admin_dashboard_stats/', {
+      params: { admin_username: adminName.value }
+    })
+    dashboardStats.value = res.data.stats || {}
+    todayStats.value = res.data.today_stats || {}
+    dashboardTrend.value = res.data.trend_7d || []
+    dashboardStatusDistribution.value = res.data.status_distribution || {}
+  } catch (error) {
+    dashboardStats.value = {}
+    todayStats.value = {}
+    dashboardTrend.value = []
+    dashboardStatusDistribution.value = {}
+  }
+}
+const fetchPointTransactions = async (page = 1) => {
+  try {
+    const res = await axios.get('http://127.0.0.1:8000/api/admin_point_transactions/', {
+      params: {
+        admin_username: adminName.value,
+        keyword: pointTxKeyword.value,
+        page,
+        page_size: pointTxPageSize
+      }
+    })
+    pointTransactions.value = res.data.data || []
+    pointTxPage.value = res.data.pagination?.page || 1
+    pointTxTotalPages.value = res.data.pagination?.total_pages || 1
+  } catch (error) {
+    pointTransactions.value = []
+    pointTxPage.value = 1
+    pointTxTotalPages.value = 1
+  }
+}
+const changePointTxPage = (page) => {
+  if (page < 1 || page > pointTxTotalPages.value) return
+  fetchPointTransactions(page)
+}
+const exportPointTransactionsCsv = () => {
+  const params = new URLSearchParams({
+    admin_username: adminName.value || '',
+    keyword: pointTxKeyword.value || ''
+  })
+  const url = `http://127.0.0.1:8000/api/admin_point_transactions/export_csv/?${params.toString()}`
+  window.open(url, '_blank')
+}
 
 const switchView = (view) => {
   currentView.value = view
   searchName.value = ''
+  announcementSearchName.value = ''
+  announcementAuthorFilter.value = 'all'
   pendingSearchName.value = ''
   historySearchName.value = ''
   initialTaskSearchName.value = ''
   recheckTaskSearchName.value = ''
   terminationTaskSearchName.value = ''
+  pointTxKeyword.value = ''
   usersPage.value = 1
   pendingAppsPage.value = 1
   historyAppsPage.value = 1
@@ -770,6 +1084,8 @@ const switchView = (view) => {
   initialTasksPage.value = 1
   recheckTasksPage.value = 1
   terminationTasksPage.value = 1
+  pointTxPage.value = 1
+  pointTxTotalPages.value = 1
   applyHistoryStatusFilter.value = 'all'
   processStatusFilter.value = 'all' // 切换视图时重置状态
   refreshData()
@@ -778,12 +1094,20 @@ const switchView = (view) => {
 // --- 审批逻辑 ---
 const approvePost = async (id) => { await axios.post('http://127.0.0.1:8000/api/review_post/', { id, action: 'approve' }); refreshData() }
 const approve = async (item) => {
-  await axios.post('http://127.0.0.1:8000/api/approve/', {
-    id: item.id,
-    username: item.username,
-    apply_type: item.apply_type
-  })
-  refreshData()
+  try {
+    const res = await axios.post('http://127.0.0.1:8000/api/approve/', {
+      id: item.id,
+      username: item.username,
+      apply_type: item.apply_type
+    })
+    if (res.data.code !== 200) {
+      alert(res.data.message || '审核通过失败')
+      return
+    }
+    refreshData()
+  } catch (error) {
+    alert(error.response?.data?.message || '审核通过失败')
+  }
 }
 const publishAnnouncement = async () => {
   if (!announcementForm.value.title.trim() || !announcementForm.value.content.trim()) {
@@ -814,6 +1138,43 @@ const deleteAnnouncement = async (id) => {
     return
   }
   fetchAnnouncements()
+}
+const blacklistUser = async (user) => {
+  const reason = prompt(`请输入拉黑 ${user.username} 的原因`, '违规内容发布')
+  if (reason === null) return
+  const daysInput = prompt('拉黑天数（默认30）', '30')
+  const days = Number(daysInput || 30)
+  try {
+    const res = await axios.post('http://127.0.0.1:8000/api/blacklist_user/', {
+      admin_username: adminName.value,
+      user_id: user.id,
+      reason: reason.trim(),
+      days: Number.isInteger(days) ? days : 30
+    })
+    if (res.data.code !== 200) {
+      alert(res.data.message || '拉黑失败')
+      return
+    }
+    refreshData()
+  } catch (error) {
+    alert(error.response?.data?.message || '拉黑失败')
+  }
+}
+const unblacklistUser = async (user) => {
+  if (!confirm(`确认解除 ${user.username} 的黑名单状态吗？`)) return
+  try {
+    const res = await axios.post('http://127.0.0.1:8000/api/unblacklist_user/', {
+      admin_username: adminName.value,
+      user_id: user.id
+    })
+    if (res.data.code !== 200) {
+      alert(res.data.message || '解禁失败')
+      return
+    }
+    refreshData()
+  } catch (error) {
+    alert(error.response?.data?.message || '解禁失败')
+  }
 }
 const openPointsPrompt = async (user) => {
   const input = prompt(`请输入 ${user.username} 的新积分（当前 ${user.points || 0}）`, user.points || 0)
@@ -852,9 +1213,17 @@ const confirmReject = async () => {
       reason: rejectReason.value
     }
     : { id: currentUser.value, action: 'reject', reason: rejectReason.value }
-  await axios.post(`http://127.0.0.1:8000${url}`, data)
-  showRejectModal.value = false
-  refreshData()
+  try {
+    const res = await axios.post(`http://127.0.0.1:8000${url}`, data)
+    if (res.data.code && res.data.code !== 200) {
+      alert(res.data.message || '拒绝失败')
+      return
+    }
+    showRejectModal.value = false
+    refreshData()
+  } catch (error) {
+    alert(error.response?.data?.message || '拒绝失败')
+  }
 }
 
 const submitAudit = async (action) => {
@@ -912,6 +1281,15 @@ const formatUserRole = (u) => {
   return formatRole(u.role)
 }
 const formatApplyType = (t) => ({ expert: '邻里达人', provider: '认证服务者' }[t] || '邻里达人')
+const formatApplyPrice = (item) => {
+  if (item?.apply_type === 'provider') {
+    if (item.provider_price_min !== null && item.provider_price_min !== undefined && item.provider_price_max !== null && item.provider_price_max !== undefined) {
+      return `${item.provider_price_min}元-${item.provider_price_max}元`
+    }
+    return '-'
+  }
+  return item?.pricing_note || '-'
+}
 const formatCategory = (c) => ({ errand: '跑腿', repair: '维修', pet: '宠物' }[c] || '互助')
 const isProcessed = (s) => ['pending', 'rejected', 'finished'].includes(s)
 
@@ -945,8 +1323,8 @@ onMounted(refreshData)
 
 /* 头部 */
 .content-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 30px; }
-.content-header h1 { font-size: 28px; color: #1a4d38; font-weight: 700; }
-.subtitle { color: #6b7c74; font-size: 14px; margin-top: 5px; }
+.content-header h1 { font-size: 32px; color: #111827; font-weight: 700; }
+.subtitle { color: #6b7280; font-size: 16px; margin-top: 8px; }
 
 /* 过滤栏 */
 .glass-card { background: rgba(255, 255, 255, 0.8); backdrop-filter: blur(10px); border-radius: 24px; border: 1px solid rgba(255, 255, 255, 0.5); }
@@ -959,9 +1337,254 @@ onMounted(refreshData)
 
 /* 表格样式 */
 .table-card { padding: 30px; box-shadow: 0 10px 30px rgba(0,0,0,0.02); }
+.dashboard-panels {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+.today-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(120px, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.kpi-card {
+  border-radius: 14px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border: 1px solid transparent;
+}
+.kpi-card .kpi-label {
+  font-size: 12px;
+  color: #5f6f67;
+}
+.kpi-card .kpi-value {
+  font-size: 28px;
+  font-weight: 700;
+  color: #1a4d38;
+}
+.kpi-card.published { background: #eef6ff; border-color: #dbeafe; }
+.kpi-card.finished { background: #ecfdf5; border-color: #d1fae5; }
+.kpi-card.disputed { background: #fff7ed; border-color: #fed7aa; }
+.kpi-card.terminated { background: #f8fafc; border-color: #e2e8f0; }
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(120px, 1fr));
+  gap: 10px;
+}
+.summary-item {
+  border: 1px solid #e2ece7;
+  border-radius: 12px;
+  background: #f8faf9;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.summary-item span {
+  font-size: 12px;
+  color: #64748b;
+}
+.summary-item strong {
+  font-size: 18px;
+  color: #1a4d38;
+}
+.trend-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 14px;
+  min-height: 160px;
+  padding: 8px 6px 0;
+}
+.trend-col {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+.bar-stack {
+  width: 100%;
+  min-height: 120px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 8px;
+}
+.bar {
+  width: 18px;
+  border-radius: 8px 8px 2px 2px;
+  transition: all 0.25s ease;
+}
+.bar.created { background: linear-gradient(180deg, #60a5fa 0%, #2563eb 100%); }
+.bar.finished { background: linear-gradient(180deg, #34d399 0%, #059669 100%); }
+.trend-date {
+  font-size: 12px;
+  color: #64748b;
+}
+.trend-legend {
+  margin-top: 8px;
+  display: flex;
+  gap: 18px;
+  color: #64748b;
+  font-size: 13px;
+}
+.trend-legend .dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 6px;
+}
+.trend-legend .dot.created { background: #3b82f6; }
+.trend-legend .dot.finished { background: #10b981; }
+.status-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.status-pie-wrap {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  margin-bottom: 16px;
+}
+.status-pie {
+  width: 180px;
+  height: 180px;
+  border-radius: 50%;
+  border: 8px solid #f8faf9;
+  box-shadow: inset 0 0 0 1px #d9e4de;
+  flex: 0 0 180px;
+}
+.status-pie-legend {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(160px, 1fr));
+  gap: 8px 14px;
+  width: 100%;
+}
+.status-pie-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #334155;
+}
+.status-pie-legend-item .swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex: 0 0 10px;
+}
+.status-pie-legend-item .label {
+  color: #475569;
+}
+.status-pie-legend-item .value {
+  margin-left: auto;
+  color: #1e293b;
+  font-weight: 600;
+}
+.status-row-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+  color: #334155;
+}
+.status-progress {
+  width: 100%;
+  height: 10px;
+  border-radius: 999px;
+  background: #e2ece7;
+  overflow: hidden;
+}
+.status-progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #10b981 0%, #34d399 100%);
+}
+.users-view-panels {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+.announcement-manage-panels {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+.announcement-list-header {
+  align-items: center;
+}
+.announcement-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.announcement-search {
+  width: 300px !important;
+  min-width: 300px;
+  max-width: 300px !important;
+  flex: 0 0 300px !important;
+}
+.announcement-author-filter {
+  min-width: 140px;
+}
 .custom-table { width: 100%; border-collapse: collapse; }
 .custom-table th { text-align: left; padding: 15px; color: #889891; border-bottom: 2px solid #f0f4f2; }
 .custom-table td { padding: 20px 15px; border-bottom: 1px solid #f0f4f2; font-size: 14px; }
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(120px, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.stat-item {
+  border: 1px solid #e2ece7;
+  border-radius: 12px;
+  background: #f8faf9;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.stat-label { color: #64748b; font-size: 12px; }
+.stat-value { color: #1a4d38; font-size: 18px; font-weight: 700; }
+.points-history-header {
+  margin-top: 18px;
+}
+.points-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.export-btn {
+  white-space: nowrap;
+}
+.points-search {
+  width: 300px !important;
+  min-width: 300px;
+  max-width: 300px !important;
+  flex: 0 0 300px !important;
+}
+.points-change {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+}
+.points-change.plus {
+  background: #dcfce7;
+  color: #166534;
+}
+.points-change.minus {
+  background: #fee2e2;
+  color: #991b1b;
+}
 .pagination {
   margin-top: 14px;
   display: flex;
@@ -1023,6 +1646,46 @@ onMounted(refreshData)
 }
 
 @media (max-width: 1200px) {
+  .today-kpi-grid {
+    grid-template-columns: repeat(2, minmax(120px, 1fr));
+  }
+  .summary-grid {
+    grid-template-columns: repeat(2, minmax(120px, 1fr));
+  }
+  .status-pie-wrap {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .status-pie-legend {
+    grid-template-columns: 1fr;
+  }
+  .stats-grid {
+    grid-template-columns: repeat(2, minmax(120px, 1fr));
+  }
+  .points-search {
+    width: 80% !important;
+    min-width: 0;
+    max-width: 100% !important;
+    flex: 1 1 auto !important;
+  }
+  .points-tools {
+    width: 100%;
+    justify-content: flex-end;
+  }
+  .announcement-list-header {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .announcement-tools {
+    width: 100%;
+    justify-content: flex-end;
+  }
+  .announcement-search {
+    width: 80% !important;
+    min-width: 0;
+    max-width: 100% !important;
+    flex: 1 1 auto !important;
+  }
   .task-card-header {
     flex-wrap: wrap;
   }
@@ -1031,6 +1694,9 @@ onMounted(refreshData)
     min-width: 0;
     max-width: 320px !important;
     flex: 0 1 320px !important;
+  }
+  .bar {
+    width: 14px;
   }
 }
 .empty-row { text-align: center; color: #94a3b8; padding: 26px 0; }

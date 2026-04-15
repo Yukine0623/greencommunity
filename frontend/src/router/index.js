@@ -124,6 +124,7 @@ import Admin from '@/views/Admin.vue'
 import MainLayout from '@/layout/MainLayout.vue'
 import TaskMarket from '../views/TaskMarket.vue'
 import MyTasks from '../views/MyTasks.vue'
+import Providers from '../views/Providers.vue'
 
 const routes = [
   {
@@ -164,6 +165,11 @@ const routes = [
         path:'mytasks',
         name:'mytasks',
         component:MyTasks
+      },
+      {
+        path: 'providers',
+        name: 'providers',
+        component: Providers
       },
 
     ]

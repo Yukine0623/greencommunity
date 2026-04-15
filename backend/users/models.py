@@ -9,6 +9,9 @@ class User(models.Model):
     is_provider = models.BooleanField(default=False, verbose_name="认证服务者资格")
     phone = models.CharField(max_length=20, null=True, blank=True)
     points = models.IntegerField(default=100, verbose_name="互助积分")
+    is_blacklisted = models.BooleanField(default=False, verbose_name="是否黑名单")
+    blacklist_reason = models.TextField(null=True, blank=True, verbose_name="拉黑原因")
+    blacklist_until = models.DateTimeField(null=True, blank=True, verbose_name="拉黑截止时间")
     created_at = models.DateTimeField(auto_now_add=True)  # 创建时间
 
     def __str__(self):
@@ -22,6 +25,8 @@ class Post(models.Model):
     author = models.CharField(max_length=100)
     status = models.CharField(max_length=20, default='pending') # pending, approved, rejected
     reject_reason = models.TextField(blank=True, null=True)
+    risk_flagged = models.BooleanField(default=False)
+    risk_keywords = models.CharField(max_length=255, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True) # 记录最后一次修改时间
 
@@ -69,6 +74,10 @@ class ExpertApplication(models.Model):
     reason = models.TextField()  # 申请理由
     service_scope = models.CharField(max_length=100, null=True, blank=True, verbose_name='服务范围')
     pricing_note = models.CharField(max_length=120, null=True, blank=True, verbose_name='定价参考')
+    provider_service_directions = models.CharField(max_length=255, null=True, blank=True, verbose_name='认证服务者服务方向标签')
+    provider_service_times = models.CharField(max_length=120, null=True, blank=True, verbose_name='认证服务者服务时间标签')
+    provider_price_range = models.CharField(max_length=120, null=True, blank=True, verbose_name='认证服务者价格区间')
+    provider_intro = models.TextField(null=True, blank=True, verbose_name='认证服务者简介')
 
     status = models.CharField(max_length=20, default='pending')     # pending / approved / rejected
 
@@ -97,6 +106,11 @@ class Task(models.Model):
         ('pet', '宠物照顾'),
         ('other', '其他互助'),
     ]
+    ASSIGNEE_TYPE_CHOICES = [
+        ('any', '不指定'),
+        ('expert', '邻里达人'),
+        ('provider', '认证服务者'),
+    ]
 
     # 1. 基础信息
     title = models.CharField(max_length=50, verbose_name="任务标题")  # 长度建议给 50
@@ -105,6 +119,9 @@ class Task(models.Model):
 
     # 2. 🚀 积分悬赏：发布时扣除/预留多少分
     reward_points = models.IntegerField(default=0, verbose_name="悬赏积分")
+    assignee_type = models.CharField(max_length=20, choices=ASSIGNEE_TYPE_CHOICES, default='any', verbose_name='指定接单身份')
+    settlement_points = models.IntegerField(null=True, blank=True, verbose_name="实际结算给接单方积分")
+    refund_points = models.IntegerField(null=True, blank=True, verbose_name="退款给发单方积分")
     community_zone = models.CharField(max_length=50, null=True, blank=True, verbose_name="社区片区")
     latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True, verbose_name="纬度")
     longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True, verbose_name="经度")
@@ -112,6 +129,14 @@ class Task(models.Model):
     # 3. 关联角色
     creator = models.ForeignKey(User, on_delete=models.CASCADE, related_name='created_tasks')
     worker = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='accepted_tasks')
+    invited_provider = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='provider_invited_tasks',
+        verbose_name='定向邀约认证服务者'
+    )
 
     # 4. 状态机：建议在注释里写全所有状态，方便以后维护
     # auditing: 待审核
@@ -130,6 +155,8 @@ class Task(models.Model):
     # 6. 🚀 审批与历史记录的核心
     audit_reason = models.TextField(null=True, blank=True, verbose_name="管理员审核/拒绝理由")
     intervention_decision = models.TextField(null=True, blank=True, verbose_name="仲裁判定判定依据")
+    risk_flagged = models.BooleanField(default=False, verbose_name="是否触发风控")
+    risk_keywords = models.CharField(max_length=255, null=True, blank=True, verbose_name="触发风控关键词")
     terminate_requested_by = models.CharField(max_length=50, null=True, blank=True, verbose_name="终止申请发起人")
     terminate_reason = models.TextField(null=True, blank=True, verbose_name="终止申请原因")
     terminate_agreed_by = models.CharField(max_length=50, null=True, blank=True, verbose_name="终止申请同意人")
@@ -177,6 +204,67 @@ class PointTransaction(models.Model):
     change = models.IntegerField()  # 正数加积分，负数减积分
     reason = models.CharField(max_length=255)  # 比如：“发布任务-代买咖啡”、“完成任务-修理水龙头”
     created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+
+class TaskQuote(models.Model):
+    STATUS_CHOICES = [
+        ('pending', '待选择'),
+        ('selected', '已中选'),
+        ('rejected', '未中选'),
+    ]
+    task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name='quotes')
+    quoter = models.ForeignKey(User, on_delete=models.CASCADE, related_name='task_quotes')
+    amount_points = models.IntegerField(default=0, verbose_name='报价积分')
+    message = models.CharField(max_length=255, null=True, blank=True, verbose_name='报价说明')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['created_at']
+        unique_together = ('task', 'quoter')
+
+
+class TaskReview(models.Model):
+    task = models.OneToOneField(Task, on_delete=models.CASCADE, related_name='review')
+    reviewer = models.ForeignKey(User, on_delete=models.CASCADE, related_name='given_task_reviews')
+    reviewee = models.ForeignKey(User, on_delete=models.CASCADE, related_name='received_task_reviews')
+    rating = models.PositiveSmallIntegerField(default=5)
+    comment = models.TextField(null=True, blank=True)
+    tags = models.CharField(max_length=255, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+
+class AuditLog(models.Model):
+    actor = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='audit_logs')
+    action = models.CharField(max_length=120)
+    target_type = models.CharField(max_length=50, null=True, blank=True)
+    target_id = models.CharField(max_length=50, null=True, blank=True)
+    detail = models.TextField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+
+class BlacklistAppeal(models.Model):
+    STATUS_CHOICES = [
+        ('pending', '待处理'),
+        ('approved', '通过'),
+        ('rejected', '拒绝'),
+    ]
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='blacklist_appeals')
+    reason = models.TextField()
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    review_note = models.TextField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ['-created_at']

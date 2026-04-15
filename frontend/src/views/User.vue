@@ -51,6 +51,13 @@
           <div class="glass-card status-card">
             <div class="card-header">
               <h3>认证服务者申请状态</h3>
+              <button
+                v-if="userStore.isProvider || providerStatus === 'approved'"
+                class="edit-provider-btn"
+                @click="openProviderProfileModal"
+              >
+                编辑服务者信息
+              </button>
             </div>
             <div class="status-display">
               <p v-if="providerStatus === 'none'" class="status-text none">你还没有申请</p>
@@ -102,7 +109,42 @@
             </select>
             <input v-model="reason" placeholder="请输入申请理由（必填）..." />
             <input v-model="serviceScope" placeholder="服务范围（认证服务者建议填写，如：家电维修/管道疏通）" />
-            <input v-model="pricingNote" placeholder="定价参考（可选，如：上门检测30元起）" />
+            <div v-if="applyType === 'provider'" class="provider-tags-block">
+              <div class="tag-section">
+                <p class="tag-title">服务方向（可多选）</p>
+                <div class="tag-options">
+                  <button
+                    v-for="item in directionOptions"
+                    :key="`dir-${item}`"
+                    type="button"
+                    :class="['multi-tag', selectedDirections.includes(item) ? 'active' : '']"
+                    @click="toggleDirection(item)"
+                  >
+                    {{ item }}
+                  </button>
+                </div>
+              </div>
+              <div class="tag-section">
+                <p class="tag-title">服务时间（可多选）</p>
+                <div class="tag-options">
+                  <button
+                    v-for="item in timeOptions"
+                    :key="`time-${item}`"
+                    type="button"
+                    :class="['multi-tag', selectedTimes.includes(item) ? 'active' : '']"
+                    @click="toggleTime(item)"
+                  >
+                    {{ item }}
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div v-if="applyType === 'provider'" class="provider-price-grid">
+              <input v-model="providerPriceMin" type="number" min="0" step="1" placeholder="最低价格（元，仅数字）" />
+              <input v-model="providerPriceMax" type="number" min="0" step="1" placeholder="最高价格（元，仅数字）" />
+            </div>
+            <input v-if="applyType === 'provider'" v-model="providerIntro" placeholder="简介（可选）" />
+            <input v-else v-model="pricingNote" placeholder="定价参考（可选，如：上门检测30元起）" />
             <button class="btn-primary" @click="handleApply">提交申请</button>
           </div>
         </div>
@@ -123,7 +165,7 @@
                   <th>提交时间</th>
                   <th>审核时间</th>
                   <th>服务范围</th>
-                  <th>定价参考</th>
+                  <th>价格区间</th>
                   <th>拒绝理由</th>
                 </tr>
               </thead>
@@ -138,7 +180,7 @@
                   <td class="time-col">{{ item.created_at }}</td>
                   <td class="time-col">{{ item.reviewed_at || '-' }}</td>
                   <td>{{ item.service_scope || '-' }}</td>
-                  <td>{{ item.pricing_note || '-' }}</td>
+                  <td>{{ formatApplyPrice(item) }}</td>
                   <td class="reason-col">{{ item.reject_reason || '-' }}</td>
                 </tr>
               </tbody>
@@ -146,7 +188,106 @@
           </div>
         </div>
 
+        <div class="glass-card points-history-card">
+          <div class="card-header">
+            <h3>积分流水记录</h3>
+            <button class="collapse-btn" @click="pointsHistoryCollapsed = !pointsHistoryCollapsed">
+              {{ pointsHistoryCollapsed ? '展开 ▾' : '收起 ▴' }}
+            </button>
+          </div>
+          <div v-if="!pointsHistoryCollapsed" class="table-wrapper">
+            <table class="custom-table">
+              <thead>
+                <tr>
+                  <th>时间</th>
+                  <th>变动</th>
+                  <th>原因</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="item in pointTransactions" :key="item.id">
+                  <td class="time-col">{{ item.created_at }}</td>
+                  <td>
+                    <span :class="['points-change', item.change >= 0 ? 'plus' : 'minus']">
+                      {{ item.change >= 0 ? '+' : '' }}{{ item.change }}
+                    </span>
+                  </td>
+                  <td>{{ item.reason }}</td>
+                </tr>
+                <tr v-if="pointTransactions.length === 0">
+                  <td colspan="3" class="time-col">暂无积分流水</td>
+                </tr>
+              </tbody>
+            </table>
+            <div class="pagination">
+              <button class="collapse-btn" :disabled="pointsPage <= 1" @click="changePointsPage(pointsPage - 1)">上一页</button>
+              <span class="time-col">{{ pointsPage }} / {{ pointsTotalPages }}</span>
+              <button class="collapse-btn" :disabled="pointsPage >= pointsTotalPages" @click="changePointsPage(pointsPage + 1)">下一页</button>
+            </div>
+          </div>
+        </div>
+
       </div>
+
+      <Transition name="fade">
+        <div v-if="showProviderProfileModal" class="modal-overlay" @click.self="showProviderProfileModal = false">
+          <div class="modal-card">
+            <div class="modal-header">
+              <h3>编辑认证服务者信息</h3>
+              <button class="close-btn" @click="showProviderProfileModal = false">×</button>
+            </div>
+            <div class="modal-body">
+              <div class="form-item">
+                <label>服务范围</label>
+                <input v-model="providerProfile.service_scope" placeholder="如：家电维修/管道疏通/保洁服务" />
+              </div>
+              <div class="form-item">
+                <label>服务方向（可多选）</label>
+                <div class="tag-options">
+                  <button
+                    v-for="item in directionOptions"
+                    :key="`profile-dir-${item}`"
+                    type="button"
+                    :class="['multi-tag', providerProfile.provider_service_directions.includes(item) ? 'active' : '']"
+                    @click="toggleProfileDirection(item)"
+                  >
+                    {{ item }}
+                  </button>
+                </div>
+              </div>
+              <div class="form-item">
+                <label>服务时间（可多选）</label>
+                <div class="tag-options">
+                  <button
+                    v-for="item in timeOptions"
+                    :key="`profile-time-${item}`"
+                    type="button"
+                    :class="['multi-tag', providerProfile.provider_service_times.includes(item) ? 'active' : '']"
+                    @click="toggleProfileTime(item)"
+                  >
+                    {{ item }}
+                  </button>
+                </div>
+              </div>
+              <div class="form-item">
+                <label>价格区间（非必填）</label>
+                <div class="provider-price-grid">
+                  <input v-model="providerProfile.provider_price_min" type="number" min="0" step="1" placeholder="最低价格（元，仅数字）" />
+                  <input v-model="providerProfile.provider_price_max" type="number" min="0" step="1" placeholder="最高价格（元，仅数字）" />
+                </div>
+              </div>
+              <div class="form-item">
+                <label>简介</label>
+                <input v-model="providerProfile.provider_intro" placeholder="填写你的服务简介" />
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button class="collapse-btn" @click="showProviderProfileModal = false">取消</button>
+              <button class="btn-primary" @click="saveProviderProfile">保存</button>
+            </div>
+          </div>
+        </div>
+      </Transition>
 
     </div>
   </div>
@@ -168,9 +309,30 @@ const applyType = ref('expert')
 const reason = ref('')
 const serviceScope = ref('')
 const pricingNote = ref('')
+const providerPriceMin = ref('')
+const providerPriceMax = ref('')
+const providerIntro = ref('')
+const selectedDirections = ref([])
+const selectedTimes = ref([])
+const directionOptions = ['家电维修', '管道疏通', '电路检修', '搬运服务', '保洁服务', '家居安装', '上门做饭', '宠物照护']
+const timeOptions = ['0:00-8:00', '8:00-13:00', '13:00-18:00', '18:00-24:00']
+const showProviderProfileModal = ref(false)
+const providerProfile = ref({
+  service_scope: '',
+  provider_service_directions: [],
+  provider_service_times: [],
+  provider_price_min: '',
+  provider_price_max: '',
+  provider_intro: ''
+})
 const applicationHistory = ref([])
 const taskSummaryCollapsed = ref(false)
 const historyCollapsed = ref(false)
+const pointsHistoryCollapsed = ref(false)
+const pointTransactions = ref([])
+const pointsPage = ref(1)
+const pointsPageSize = 8
+const pointsTotalPages = ref(1)
 const taskStatusCount = ref({
   auditing: 0,
   pending: 0,
@@ -252,20 +414,53 @@ const handleApply = async () => {
     alert('认证服务者请填写服务范围')
     return
   }
+  if (applyType.value === 'provider' && selectedDirections.value.length === 0) {
+    alert('认证服务者请至少选择一个服务方向')
+    return
+  }
+  if (applyType.value === 'provider' && selectedTimes.value.length === 0) {
+    alert('认证服务者请至少选择一个服务时间')
+    return
+  }
   const res = await axios.post('http://127.0.0.1:8000/api/apply/', {
     username: username.value,
     apply_type: applyType.value,
     reason: reason.value,
     service_scope: serviceScope.value,
-    pricing_note: pricingNote.value
+    pricing_note: pricingNote.value,
+  provider_service_directions: selectedDirections.value,
+  provider_service_times: selectedTimes.value,
+    provider_price_min: providerPriceMin.value,
+    provider_price_max: providerPriceMax.value,
+    provider_intro: providerIntro.value
   })
   alert(res.data.message)
   reason.value = ''
   serviceScope.value = ''
   pricingNote.value = ''
+  providerPriceMin.value = ''
+  providerPriceMax.value = ''
+  providerIntro.value = ''
+  selectedDirections.value = []
+  selectedTimes.value = []
   await fetchMyApplication('expert')
   await fetchMyApplication('provider')
   await fetchApplicationHistory()
+}
+
+const toggleDirection = (value) => {
+  if (selectedDirections.value.includes(value)) {
+    selectedDirections.value = selectedDirections.value.filter((item) => item !== value)
+  } else {
+    selectedDirections.value = [...selectedDirections.value, value]
+  }
+}
+const toggleTime = (value) => {
+  if (selectedTimes.value.includes(value)) {
+    selectedTimes.value = selectedTimes.value.filter((item) => item !== value)
+  } else {
+    selectedTimes.value = [...selectedTimes.value, value]
+  }
 }
 
 const fetchApplicationHistory = async () => {
@@ -312,6 +507,96 @@ const fetchMyTaskSummary = async () => {
   }
 }
 
+const fetchPointTransactions = async (page = 1) => {
+  try {
+    const res = await axios.get('http://127.0.0.1:8000/api/my_point_transactions/', {
+      params: {
+        username: username.value,
+        page,
+        page_size: pointsPageSize
+      }
+    })
+    pointTransactions.value = res.data.data || []
+    pointsPage.value = res.data.pagination?.page || 1
+    pointsTotalPages.value = res.data.pagination?.total_pages || 1
+  } catch (error) {
+    console.error('获取积分流水失败:', error)
+    pointTransactions.value = []
+    pointsPage.value = 1
+    pointsTotalPages.value = 1
+  }
+}
+
+const changePointsPage = (page) => {
+  if (page < 1 || page > pointsTotalPages.value) return
+  fetchPointTransactions(page)
+}
+const fetchProviderProfile = async () => {
+  try {
+    const res = await axios.post('http://127.0.0.1:8000/api/provider_profile/', {
+      username: username.value
+    })
+    if (res.data.code !== 200) return
+    providerProfile.value = {
+      service_scope: res.data.profile?.service_scope || '',
+      provider_service_directions: res.data.profile?.provider_service_directions || [],
+      provider_service_times: res.data.profile?.provider_service_times || [],
+      provider_price_min: res.data.profile?.provider_price_min ?? '',
+      provider_price_max: res.data.profile?.provider_price_max ?? '',
+      provider_intro: res.data.profile?.provider_intro || ''
+    }
+  } catch (error) {
+    console.error('获取认证服务者资料失败:', error)
+  }
+}
+const openProviderProfileModal = async () => {
+  await fetchProviderProfile()
+  showProviderProfileModal.value = true
+}
+const toggleProfileDirection = (value) => {
+  if (providerProfile.value.provider_service_directions.includes(value)) {
+    providerProfile.value.provider_service_directions = providerProfile.value.provider_service_directions.filter((item) => item !== value)
+  } else {
+    providerProfile.value.provider_service_directions = [...providerProfile.value.provider_service_directions, value]
+  }
+}
+const toggleProfileTime = (value) => {
+  if (providerProfile.value.provider_service_times.includes(value)) {
+    providerProfile.value.provider_service_times = providerProfile.value.provider_service_times.filter((item) => item !== value)
+  } else {
+    providerProfile.value.provider_service_times = [...providerProfile.value.provider_service_times, value]
+  }
+}
+const saveProviderProfile = async () => {
+  if (providerProfile.value.provider_service_directions.length === 0) {
+    alert('请至少选择一个服务方向')
+    return
+  }
+  if (providerProfile.value.provider_service_times.length === 0) {
+    alert('请至少选择一个服务时间')
+    return
+  }
+  try {
+    const res = await axios.post('http://127.0.0.1:8000/api/provider_profile/update/', {
+      username: username.value,
+      service_scope: providerProfile.value.service_scope,
+      provider_service_directions: providerProfile.value.provider_service_directions,
+      provider_service_times: providerProfile.value.provider_service_times,
+      provider_price_min: providerProfile.value.provider_price_min,
+      provider_price_max: providerProfile.value.provider_price_max,
+      provider_intro: providerProfile.value.provider_intro
+    })
+    if (res.data.code !== 200) {
+      alert(res.data.message || '保存失败')
+      return
+    }
+    alert('保存成功')
+    showProviderProfileModal.value = false
+  } catch (error) {
+    alert(error.response?.data?.message || '保存失败')
+  }
+}
+
 const formatStatus = (status) => {
   if (status === 'pending') return '审核中'
   if (status === 'approved') return '通过'
@@ -323,6 +608,15 @@ const formatApplyType = (type) => {
   if (type === 'provider') return '认证服务者'
   return '邻里达人'
 }
+const formatApplyPrice = (item) => {
+  if (item.apply_type === 'provider') {
+    if (item.provider_price_min !== null && item.provider_price_min !== undefined && item.provider_price_max !== null && item.provider_price_max !== undefined) {
+      return `${item.provider_price_min}元-${item.provider_price_max}元`
+    }
+    return '-'
+  }
+  return item.pricing_note || '-'
+}
 
 onMounted(() => {
   fetchUserInfo()
@@ -330,6 +624,7 @@ onMounted(() => {
   fetchMyApplication('provider')
   fetchApplicationHistory()
   fetchMyTaskSummary()
+  fetchPointTransactions(1)
 })
 </script>
 
@@ -489,6 +784,121 @@ onMounted(() => {
   transition: background 0.2s;
 }
 .btn-primary:hover { background-color: #2b6cb0; }
+.provider-tags-block {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.provider-price-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.tag-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.tag-title {
+  margin: 0;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 600;
+}
+.tag-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.multi-tag {
+  border: 1px solid #dbe3eb;
+  background: #fff;
+  color: #334155;
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.multi-tag.active {
+  border-color: #2563eb;
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+.edit-provider-btn {
+  border: 1px solid #93c5fd;
+  background: #eff6ff;
+  color: #1d4ed8;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2400;
+  padding: 16px;
+}
+.modal-card {
+  width: 620px;
+  max-width: 100%;
+  max-height: 88vh;
+  overflow-y: auto;
+  background: #fff;
+  border-radius: 18px;
+  padding: 22px;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.2);
+}
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.modal-header h3 {
+  margin: 0;
+  color: #1e293b;
+}
+.close-btn {
+  border: none;
+  background: #f1f5f9;
+  color: #475569;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 18px;
+}
+.modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.modal-body .form-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.modal-body .form-item label {
+  color: #334155;
+  font-size: 13px;
+  font-weight: 600;
+}
+.modal-body .form-item input {
+  border: 1px solid #dbe3eb;
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+.modal-footer {
+  margin-top: 14px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
 
 /* 历史记录表格 */
 .table-wrapper {
@@ -531,6 +941,28 @@ onMounted(() => {
 
 .time-col { color: #64748b; font-size: 13px; }
 .reason-col { color: #e53e3e; }
+.points-change {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+}
+.points-change.plus {
+  background: #dcfce7;
+  color: #166534;
+}
+.points-change.minus {
+  background: #fee2e2;
+  color: #991b1b;
+}
+.pagination {
+  margin-top: 12px;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+}
 
 .task-summary-card .summary-grid {
   display: grid;
@@ -571,6 +1003,9 @@ onMounted(() => {
   }
   .task-summary-card .summary-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .provider-price-grid {
+    grid-template-columns: 1fr;
   }
 }
 </style>

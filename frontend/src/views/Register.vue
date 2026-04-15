@@ -80,7 +80,7 @@ const goLogin = () => {
   width: 360px;
   text-align: center;
 }
-h2 { color: #333; margin-bottom: 1.5rem; font-weight: 600; }
+h2 { color: #111827; margin-bottom: 1.5rem; font-weight: 700; }
 .form-group { display: flex; flex-direction: column; gap: 14px; }
 input {
   padding: 12px;
@@ -111,4 +111,3 @@ button:hover { opacity: 0.9; }
 .error { color: #e74c3c; }
 .success { color: #2ecc71; }
 </style>
-

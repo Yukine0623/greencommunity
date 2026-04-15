@@ -15,6 +15,7 @@
           <option value="created_desc">按发布时间（新到旧）</option>
           <option value="reward_desc">按积分（高到低）</option>
           <option value="distance_asc">按距离（近到远）</option>
+          <option value="smart_desc">智能推荐（综合排序）</option>
         </select>
         <div class="search-bar">
           <span class="search-icon">🔍</span>
@@ -39,6 +40,10 @@
           </div>
           <p class="card-desc">{{ task.content }}</p>
           <p class="distance-line">
+            <span>🎯 {{ formatAssigneeType(task.assignee_type) }}</span>
+            <span v-if="task.invited_provider"> · 定向邀约 {{ task.invited_provider }}</span>
+          </p>
+          <p class="distance-line">
             <span v-if="task.distance_km !== null && task.distance_km !== undefined">📍 距你 {{ task.distance_km }} km</span>
             <span v-else>📍 距离未知</span>
             <span v-if="task.community_zone"> · {{ task.community_zone }}</span>
@@ -48,7 +53,10 @@
         <div class="card-footer">
           <div class="action-group">
             <template v-if="canAcceptTasks">
-              <button class="btn-accept" @click="handleAccept(task.id)">接受任务</button>
+              <button class="btn-accept" :disabled="!canAcceptTask(task)" @click="handleAccept(task.id)">
+                {{ canAcceptTask(task) ? '接受任务' : '不符合接单条件' }}
+              </button>
+              <button class="btn-quote" @click="openQuoteModal(task)">我要报价</button>
             </template>
             <button class="btn-detail" @click="openDetail(task)">查看详情</button>
           </div>
@@ -99,6 +107,25 @@
                 placeholder="请输入悬赏积分"
               />
               <small class="form-tip">发布后会先冻结这部分积分，任务完成后发放给接单者。</small>
+            </div>
+
+            <div class="form-item">
+              <label>接单对象（可选指定）</label>
+              <select v-model="newTask.assignee_type">
+                <option value="any">不指定（任何可接单身份）</option>
+                <option value="expert">仅限邻里达人</option>
+                <option value="provider">仅限认证服务者</option>
+              </select>
+              <small class="form-tip">用于限制任务可接单人群。</small>
+            </div>
+
+            <div class="form-item">
+              <label>定向邀约认证服务者（可选）</label>
+              <input
+                v-model="newTask.invited_provider_username"
+                placeholder="填写认证服务者用户名（可不填）"
+              />
+              <small class="form-tip">填写后该任务仅该认证服务者可接单。</small>
             </div>
 
             <div class="form-item">
@@ -154,6 +181,27 @@
       :rows="detailRows"
       @close="showDetailModal = false"
     />
+
+    <Transition name="fade">
+      <div v-if="showQuoteModal" class="modal-overlay" @click.self="showQuoteModal = false">
+        <div class="modal-content glass-card mini-modal">
+          <h3 class="modal-title">提交报价</h3>
+          <p class="quote-task-title">{{ quoteForm.taskTitle }}</p>
+          <div class="form-item">
+            <label>报价积分</label>
+            <input v-model.number="quoteForm.amount_points" type="number" min="0" step="1" placeholder="请输入报价积分" />
+          </div>
+          <div class="form-item">
+            <label>报价说明</label>
+            <textarea v-model="quoteForm.message" maxlength="255" placeholder="请输入你的服务说明（可选）"></textarea>
+          </div>
+          <div class="modal-footer">
+            <button class="btn-detail" @click="showQuoteModal = false">取消</button>
+            <button class="btn-accept" @click="submitQuote">提交报价</button>
+          </div>
+        </div>
+      </div>
+    </Transition>
   </div>
 </template>
 
@@ -172,6 +220,7 @@ const canAcceptTasks = computed(() => userStore.isExpert || userStore.isProvider
 const tasks = ref([])
 const showModal = ref(false)
 const showDetailModal = ref(false)
+const showQuoteModal = ref(false)
 const currentTask = ref({})
 const searchQuery = ref('')
 const selectedCategory = ref('all')
@@ -185,7 +234,20 @@ const publishLocation = ref({
   latitude: null,
   longitude: null
 })
-const newTask = ref({ title: '', category: 'errand', content: '', reward_points: 10 })
+const newTask = ref({
+  title: '',
+  category: 'errand',
+  content: '',
+  reward_points: 10,
+  assignee_type: 'any',
+  invited_provider_username: ''
+})
+const quoteForm = ref({
+  task_id: null,
+  taskTitle: '',
+  amount_points: 0,
+  message: ''
+})
 
 // 接口逻辑
 const getCurrentLocation = () => {
@@ -227,8 +289,10 @@ const clearPublishLocation = () => {
 const fetchTasks = async () => {
   try {
     const params = {
-      category: selectedCategory.value
+      category: selectedCategory.value,
+      username: username.value
     }
+    if (sortType.value === 'smart_desc') params.sort_mode = 'smart'
     if (userLocation.value.latitude && userLocation.value.longitude) {
       params.user_lat = userLocation.value.latitude
       params.user_lng = userLocation.value.longitude
@@ -253,6 +317,8 @@ const submitTask = async () => {
       content: newTask.value.content,
       category: newTask.value.category,
       reward_points: Number(newTask.value.reward_points || 10),
+      assignee_type: newTask.value.assignee_type || 'any',
+      invited_provider_username: (newTask.value.invited_provider_username || '').trim(),
       community_zone: publishLocation.value.community_zone || null,
       latitude: publishLocation.value.latitude,
       longitude: publishLocation.value.longitude,
@@ -266,7 +332,7 @@ const submitTask = async () => {
     
     // 2. 关闭弹窗并重置表单
     showModal.value = false;
-    newTask.value = { title: '', category: 'errand', content: '', reward_points: 10 };
+    newTask.value = { title: '', category: 'errand', content: '', reward_points: 10, assignee_type: 'any', invited_provider_username: '' };
     clearPublishLocation()
     
     // 3. 刷新列表（此时新任务在审核中，大厅列表依然不显示它是正常的）
@@ -291,10 +357,50 @@ const handleAccept = async (id) => {
     alert('接单失败')
   }
 }
+const canAcceptTask = (task) => {
+  if (!canAcceptTasks.value) return false
+  const assignee = task.assignee_type || 'any'
+  if (assignee === 'expert' && !userStore.isExpert) return false
+  if (assignee === 'provider' && !userStore.isProvider) return false
+  if (task.invited_provider && task.invited_provider !== username.value) return false
+  return true
+}
 
 const openDetail = (task) => {
   currentTask.value = task
   showDetailModal.value = true
+}
+const openQuoteModal = (task) => {
+  quoteForm.value = {
+    task_id: task.id,
+    taskTitle: task.title,
+    amount_points: Number(task.reward_points || 0),
+    message: ''
+  }
+  showQuoteModal.value = true
+}
+const submitQuote = async () => {
+  if (!quoteForm.value.task_id) return
+  if (!Number.isInteger(quoteForm.value.amount_points) || quoteForm.value.amount_points < 0) {
+    alert('报价积分必须为大于等于 0 的整数')
+    return
+  }
+  try {
+    const res = await axios.post('http://127.0.0.1:8000/api/task_quote/create/', {
+      username: username.value,
+      task_id: quoteForm.value.task_id,
+      amount_points: quoteForm.value.amount_points,
+      message: quoteForm.value.message
+    })
+    if (res.data.code !== 200) {
+      alert(res.data.message || '报价失败')
+      return
+    }
+    alert('报价成功')
+    showQuoteModal.value = false
+  } catch (error) {
+    alert(error.response?.data?.message || '报价失败，请稍后重试')
+  }
 }
 const detailRows = computed(() => {
   return [
@@ -302,6 +408,8 @@ const detailRows = computed(() => {
     { label: '任务类型', value: formatCategory(currentTask.value.category) },
     { label: '发布人', value: currentTask.value.creator },
     { label: '悬赏积分', value: currentTask.value.reward_points ?? 0 },
+    { label: '接单对象', value: formatAssigneeType(currentTask.value.assignee_type) },
+    { label: '定向邀约', value: currentTask.value.invited_provider || '无' },
     { label: '发布时间', value: currentTask.value.created_at },
     { label: '任务描述', value: currentTask.value.content, multiline: true }
   ]
@@ -330,6 +438,8 @@ const filteredTasks = computed(() => {
       if (bd == null) return -1
       return ad - bd
     })
+  } else if (sortType.value === 'smart_desc') {
+    sorted.sort((a, b) => (b.recommend_score || 0) - (a.recommend_score || 0))
   } else {
     sorted.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
   }
@@ -340,6 +450,10 @@ const filteredTasks = computed(() => {
 const formatCategory = (cat) => {
   const map = { errand: '跑腿代购', repair: '家电维修', pet: '宠物照顾', other: '其他互助' }
   return map[cat] || '邻里互助'
+}
+const formatAssigneeType = (type) => {
+  const map = { any: '不指定', expert: '仅邻里达人', provider: '仅认证服务者' }
+  return map[type] || '不指定'
 }
 </script>
 
@@ -367,8 +481,8 @@ const formatCategory = (cat) => {
   gap: 14px;
   padding: 30px 45px; margin-bottom: 35px;
 }
-.market-header h1 { font-size: 28px; color: #2d3748; margin: 0; }
-.subtitle { color: #718096; margin: 0; font-size: 14px; }
+.market-header h1 { font-size: 32px; color: #111827; margin: 0; }
+.subtitle { color: #6b7280; margin: 0; font-size: 16px; }
 .header-controls {
   display: flex;
   align-items: center;
@@ -376,7 +490,11 @@ const formatCategory = (cat) => {
   width: 100%;
 }
 
-.search-bar { position: relative; flex: 1; min-width: 260px; }
+.search-bar {
+  position: relative;
+  width: 420px;
+  flex: 0 0 420px;
+}
 .search-bar input {
   padding: 12px 20px 12px 45px; border-radius: 30px; border: 1px solid #e2e8f0; width: 100%; outline: none; transition: 0.3s;
 }
@@ -393,10 +511,24 @@ const formatCategory = (cat) => {
 
 .btn-add-task-fab {
   width: 52px; height: 52px; border-radius: 50%; background: #4299e1; color: white;
-  border: none; font-size: 30px; cursor: pointer; margin-left: 15px;
+  border: none; font-size: 30px; cursor: pointer; margin-left: auto;
   box-shadow: 0 4px 15px rgba(66, 153, 225, 0.3); transition: 0.3s;
 }
 .btn-add-task-fab:hover { transform: scale(1.1); background: #3182ce; }
+
+@media (max-width: 1280px) {
+  .header-controls {
+    flex-wrap: wrap;
+  }
+  .search-bar {
+    width: 100%;
+    flex: 1 1 100%;
+    margin-left: 0;
+  }
+  .btn-add-task-fab {
+    margin-left: auto;
+  }
+}
 
 /* 3. 任务卡片网格 */
 .task-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 25px; }
@@ -442,7 +574,20 @@ const formatCategory = (cat) => {
 .card-footer { border-top: 1px solid #f1f5f9; padding-top: 18px; margin-top: 10px; }
 .action-group { display: flex; gap: 12px; justify-content: flex-end; }
 .btn-accept { background: #4299e1; color: white; border: none; padding: 9px 22px; border-radius: 10px; cursor: pointer; font-weight: 600; }
+.btn-accept:disabled { background: #94a3b8; cursor: not-allowed; }
+.btn-quote { background: #edf2ff; color: #3730a3; border: 1px solid #c7d2fe; padding: 9px 18px; border-radius: 10px; cursor: pointer; font-weight: 600; }
 .btn-detail { background: #f8fafc; border: 1px solid #e2e8f0; padding: 9px 22px; border-radius: 10px; color: #4a5568; cursor: pointer; }
+.mini-modal {
+  width: 460px;
+  max-height: 88vh;
+  overflow-y: auto;
+  padding: 28px;
+}
+.quote-task-title {
+  margin: -8px 0 12px;
+  color: #475569;
+  font-size: 14px;
+}
 
 /* 4. 弹窗样式修正 (垂直布局) */
 .modal-overlay {

@@ -59,7 +59,12 @@
 
         <div class="card-footer">
           <div class="action-group">
-            <button v-if="activeTab === 'posted' && task.status === 'submitted'" class="btn-blue" @click="handleConfirmFinish(task.id)">确认结项</button>
+            <button v-if="activeTab === 'posted' && task.status === 'submitted'" class="btn-blue" @click="handleConfirmFinish(task)">确认结项</button>
+            <button v-if="activeTab === 'posted' && task.status === 'pending'" class="btn-ghost" @click="openQuoteManage(task)">报价管理</button>
+            <button v-if="activeTab === 'posted' && task.status === 'finished' && task.worker && !task.reviewed_by_creator" class="btn-success" @click="openReviewModal(task)">评价服务</button>
+            <button v-if="task.reviewed_by_creator" class="btn-ghost" @click="openReviewDetailModal(task)">
+              {{ activeTab === 'accepted' ? '查看收到评价' : '查看评价' }}
+            </button>
             <button v-if="activeTab === 'posted' && canEditTask(task)" class="btn-ghost" @click="openEditModal(task)">修改</button>
             <button v-if="activeTab === 'posted' && canDeleteTask(task)" class="btn-danger-lite" @click="handleDeleteTask(task)">删除</button>
             <button
@@ -203,6 +208,118 @@
       </div>
     </Transition>
 
+    <Transition name="fade">
+      <div v-if="showQuoteManageModal" class="modal-overlay" @click.self="showQuoteManageModal = false">
+        <div class="modal-content glass-card mini-modal">
+          <h3 class="modal-title">报价管理</h3>
+          <p class="modal-subtitle">{{ quoteManageTask?.title || '' }}</p>
+          <div v-if="quoteList.length === 0" class="empty-state" style="padding: 24px 8px;">暂无报价</div>
+          <div v-else class="quote-list">
+            <div class="quote-item" v-for="q in quoteList" :key="q.id">
+              <div class="quote-main">
+                <div class="quote-title">{{ q.quoter }} · 报价 {{ q.amount_points }} 积分</div>
+                <div class="quote-message">{{ q.message || '暂无说明' }}</div>
+                <div class="quote-meta">{{ q.created_at }} · {{ q.status }}</div>
+              </div>
+              <button v-if="q.status === 'pending'" class="btn-blue" @click="chooseQuote(q)">选择此报价</button>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn-cancel" @click="showQuoteManageModal = false">关闭</button>
+          </div>
+        </div>
+      </div>
+    </Transition>
+
+    <Transition name="fade">
+      <div v-if="showReviewModal" class="modal-overlay" @click.self="showReviewModal = false">
+        <div class="modal-content glass-card mini-modal review-modal">
+          <h3 class="modal-title">评价服务</h3>
+          <p class="modal-subtitle">{{ reviewForm.taskTitle }}</p>
+          <div class="form-item">
+            <label>星级评分</label>
+            <div class="star-rating">
+              <button
+                v-for="star in 5"
+                :key="star"
+                type="button"
+                :class="['star-btn', { active: star <= reviewForm.rating }]"
+                @click="reviewForm.rating = star"
+              >
+                ★
+              </button>
+              <span class="rating-text">{{ reviewForm.rating }} 分</span>
+            </div>
+          </div>
+          <div class="form-item">
+            <label>服务标签（可多选）</label>
+            <div class="review-tags">
+              <button
+                v-for="tag in reviewTagOptions"
+                :key="tag"
+                type="button"
+                :class="['tag-btn', { active: reviewForm.tags.includes(tag) }]"
+                @click="toggleReviewTag(tag)"
+              >
+                {{ tag }}
+              </button>
+            </div>
+          </div>
+          <div class="form-item">
+            <label>评价内容</label>
+            <textarea v-model="reviewForm.comment" placeholder="写下你的服务评价..." class="modal-textarea"></textarea>
+          </div>
+          <div class="modal-footer">
+            <button class="btn-cancel" @click="showReviewModal = false">取消</button>
+            <button class="btn-blue" @click="submitReview">提交评价</button>
+          </div>
+        </div>
+      </div>
+    </Transition>
+
+    <Transition name="fade">
+      <div v-if="showReviewDetailModal" class="modal-overlay" @click.self="showReviewDetailModal = false">
+        <div class="modal-content glass-card mini-modal review-modal">
+          <h3 class="modal-title">查看评价</h3>
+          <p class="modal-subtitle">{{ reviewDetail.taskTitle }}</p>
+          <p class="modal-subtitle">评价人：{{ reviewDetail.reviewer || '-' }} · 时间：{{ reviewDetail.created_at || '-' }}</p>
+          <div class="form-item">
+            <label>星级评分</label>
+            <div class="star-rating readonly">
+              <span
+                v-for="star in 5"
+                :key="`detail-${star}`"
+                :class="['star-btn', 'readonly-star', { active: star <= (reviewDetail.rating || 0) }]"
+              >
+                ★
+              </span>
+              <span class="rating-text">{{ reviewDetail.rating || 0 }} 分</span>
+            </div>
+          </div>
+          <div class="form-item">
+            <label>服务标签</label>
+            <div class="review-tags">
+              <span
+                v-for="tag in reviewDetail.tags"
+                :key="`tag-${tag}`"
+                class="tag-btn active readonly-tag"
+              >
+                {{ tag }}
+              </span>
+              <span v-if="!reviewDetail.tags || reviewDetail.tags.length === 0" class="modal-subtitle">未选择标签</span>
+            </div>
+          </div>
+          <div class="form-item">
+            <label>评价内容</label>
+            <textarea :value="reviewDetail.comment || '暂无评价内容'" class="modal-textarea" readonly></textarea>
+          </div>
+          <div class="modal-footer">
+            <button class="btn-cancel" @click="showReviewDetailModal = false">关闭</button>
+          </div>
+        </div>
+      </div>
+    </Transition>
+
     <DetailModal
       :visible="showDetailModal && !!currentTask"
       title="📋 任务详情"
@@ -265,6 +382,9 @@ const showAbandonModal = ref(false)
 const showEditModal = ref(false)
 const showDetailModal = ref(false)
 const showChatModal = ref(false)
+const showQuoteManageModal = ref(false)
+const showReviewModal = ref(false)
+const showReviewDetailModal = ref(false)
 const currentTask = ref(null)
 const submitForm = ref({ taskId: null, desc: '' })
 const abandonForm = ref({ taskId: null, reason: '' })
@@ -284,6 +404,24 @@ const chatInput = ref('')
 const chatListRef = ref(null)
 const lastChatId = ref(0)
 let chatTimer = null
+const quoteManageTask = ref(null)
+const quoteList = ref([])
+const reviewForm = ref({
+  task_id: null,
+  taskTitle: '',
+  rating: 5,
+  tags: [],
+  comment: ''
+})
+const reviewDetail = ref({
+  taskTitle: '',
+  rating: 0,
+  tags: [],
+  comment: '',
+  reviewer: '',
+  created_at: ''
+})
+const reviewTagOptions = ['准时', '沟通顺畅', '专业', '态度好', '效率高', '细致认真', '价格合理', '值得推荐']
 
 const userRole = computed(() => userStore.role === 'user' ? 'resident' : userStore.role)
 const canViewAcceptedTab = computed(() => {
@@ -554,18 +692,119 @@ const handleRespondTerminate = async (task, agree) => {
   }
 }
 
-const handleConfirmFinish = async (id) => {
-  if (!confirm('确认该任务已完成？')) return
+const handleConfirmFinish = async (task) => {
+  const raw = prompt(`请输入结算给接单者的积分（0-${task.reward_points}）`, String(task.reward_points))
+  if (raw === null) return
+  const workerPoints = Number(raw)
+  if (!Number.isInteger(workerPoints) || workerPoints < 0 || workerPoints > Number(task.reward_points || 0)) {
+    alert('请输入合法积分')
+    return
+  }
+  const refundPoints = Number(task.reward_points || 0) - workerPoints
+  if (!confirm(`确认结项？接单者获得 ${workerPoints} 积分，发单者退回 ${refundPoints} 积分。`)) return
   try {
-    await axios.post('http://127.0.0.1:8000/api/finish_task/', {
-      task_id: id,
-      username: userStore.username
+    await axios.post('http://127.0.0.1:8000/api/finish_task_with_settlement/', {
+      task_id: task.id,
+      username: userStore.username,
+      worker_points: workerPoints
     })
     fetchMyTasks()
   } catch (error) {
     console.error('确认结项失败:', error)
     alert('确认结项失败，请稍后重试')
   }
+}
+const openQuoteManage = async (task) => {
+  quoteManageTask.value = task
+  showQuoteManageModal.value = true
+  try {
+    const res = await axios.get('http://127.0.0.1:8000/api/task_quote/list/', {
+      params: { username: userStore.username, task_id: task.id }
+    })
+    quoteList.value = res.data.quotes || []
+  } catch (error) {
+    quoteList.value = []
+    alert(error.response?.data?.message || '获取报价失败')
+  }
+}
+const chooseQuote = async (quote) => {
+  if (!quoteManageTask.value) return
+  if (!confirm(`确认选择 ${quote.quoter} 的报价（${quote.amount_points} 积分）吗？`)) return
+  try {
+    const res = await axios.post('http://127.0.0.1:8000/api/task_quote/choose/', {
+      username: userStore.username,
+      task_id: quoteManageTask.value.id,
+      quote_id: quote.id
+    })
+    if (res.data.code !== 200) {
+      alert(res.data.message || '选择报价失败')
+      return
+    }
+    showQuoteManageModal.value = false
+    fetchMyTasks()
+  } catch (error) {
+    alert(error.response?.data?.message || '选择报价失败')
+  }
+}
+const openReviewModal = (task) => {
+  reviewForm.value = {
+    task_id: task.id,
+    taskTitle: task.title,
+    rating: 5,
+    tags: [],
+    comment: ''
+  }
+  showReviewModal.value = true
+}
+const toggleReviewTag = (tag) => {
+  if (reviewForm.value.tags.includes(tag)) {
+    reviewForm.value.tags = reviewForm.value.tags.filter((t) => t !== tag)
+  } else {
+    reviewForm.value.tags = [...reviewForm.value.tags, tag]
+  }
+}
+const submitReview = async () => {
+  if (!reviewForm.value.task_id) return
+  if (!Number.isInteger(reviewForm.value.rating) || reviewForm.value.rating < 1 || reviewForm.value.rating > 5) {
+    alert('评分必须是 1-5 的整数')
+    return
+  }
+  try {
+    const res = await axios.post('http://127.0.0.1:8000/api/task_review/create/', {
+      username: userStore.username,
+      task_id: reviewForm.value.task_id,
+      rating: reviewForm.value.rating,
+      comment: reviewForm.value.comment,
+      tags: reviewForm.value.tags
+    })
+    if (res.data.code !== 200) {
+      alert(res.data.message || '评价失败')
+      return
+    }
+    showReviewModal.value = false
+    fetchMyTasks()
+  } catch (error) {
+    alert(error.response?.data?.message || '评价失败')
+  }
+}
+const parseReviewTags = (tags) => {
+  if (Array.isArray(tags)) return tags
+  if (typeof tags === 'string') {
+    return tags.split(',').map((t) => t.trim()).filter(Boolean)
+  }
+  return []
+}
+const openReviewDetailModal = (task) => {
+  const review = task.review || {}
+  reviewDetail.value = {
+    taskTitle: task.title,
+    rating: Number(review.rating || 0),
+    tags: parseReviewTags(review.tags),
+    comment: review.comment || '',
+    reviewer: review.reviewer || '',
+    created_at: review.created_at || ''
+  }
+  showReviewDetailModal.value = true
 }
 const canOpenChat = (task) => {
   return !!task.worker && ['accepted', 'submitted', 'intervention'].includes(task.status)
@@ -886,6 +1125,85 @@ onUnmounted(() => stopChatPolling())
 .modal-footer { display: flex; justify-content: flex-end; gap: 10px; }
 .btn-cancel { background: #edf2f7; color: #4a5568; border: none; padding: 10px 25px; border-radius: 10px; cursor: pointer; }
 .btn-danger { background: #e53e3e; color: white; border: none; padding: 10px 25px; border-radius: 10px; cursor: pointer; }
+.modal-subtitle { margin: -6px 0 10px; color: #64748b; font-size: 13px; }
+.review-modal .form-item {
+  margin-bottom: 18px;
+  gap: 12px;
+}
+.review-modal label {
+  font-size: 16px;
+  font-weight: 700;
+  color: #1e293b;
+}
+.review-modal .modal-textarea {
+  min-height: 130px;
+  line-height: 1.75;
+}
+.star-rating {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.star-btn {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 30px;
+  line-height: 1;
+  color: #cbd5e1;
+  padding: 0;
+}
+.star-rating.readonly .readonly-star {
+  cursor: default;
+}
+.readonly-tag {
+  cursor: default;
+}
+.star-btn.active {
+  color: #f59e0b;
+  text-shadow: 0 2px 4px rgba(245, 158, 11, 0.25);
+}
+.rating-text {
+  margin-left: 4px;
+  color: #475569;
+  font-size: 14px;
+  font-weight: 600;
+}
+.review-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.tag-btn {
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  color: #334155;
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.tag-btn.active {
+  border-color: #60a5fa;
+  background: #dbeafe;
+  color: #1d4ed8;
+  font-weight: 700;
+}
+.quote-list { display: flex; flex-direction: column; gap: 10px; max-height: 360px; overflow-y: auto; }
+.quote-item {
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.quote-main { min-width: 0; }
+.quote-title { font-weight: 700; color: #1e293b; }
+.quote-message { color: #475569; font-size: 13px; margin-top: 4px; }
+.quote-meta { color: #94a3b8; font-size: 12px; margin-top: 4px; }
 
 .empty-state { text-align: center; padding: 100px; color: #cbd5e0; }
 .fade-enter-active, .fade-leave-active { transition: 0.3s; }
