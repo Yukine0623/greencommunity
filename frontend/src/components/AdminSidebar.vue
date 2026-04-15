@@ -28,7 +28,7 @@
         :class="{ active: currentActive === 'users' }"
         @click="handleSwitch('users')"
       >
-        <span class="icon">👥</span> 全部用户
+        <span class="icon">👥</span> 用户管理
       </div>
       
       <div 

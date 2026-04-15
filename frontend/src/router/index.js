@@ -125,6 +125,7 @@ import MainLayout from '@/layout/MainLayout.vue'
 import TaskMarket from '../views/TaskMarket.vue'
 import MyTasks from '../views/MyTasks.vue'
 import Providers from '../views/Providers.vue'
+import DirectedInvites from '../views/DirectedInvites.vue'
 
 const routes = [
   {
@@ -170,6 +171,11 @@ const routes = [
         path: 'providers',
         name: 'providers',
         component: Providers
+      },
+      {
+        path: 'provider-invites',
+        name: 'provider-invites',
+        component: DirectedInvites
       },
 
     ]

@@ -8,24 +8,20 @@
           <h1>{{ viewTitle }}</h1>
           <p class="subtitle">工作愉快，{{ adminName }}。当前系统运行正常。</p>
         </div>
+        <div v-if="currentView === 'taskAudit'" class="header-actions">
+          <button class="btn-ghost" :disabled="backfillLocationLoading" @click="runTaskLocationBackfill">
+            {{ backfillLocationLoading ? '回填中...' : '回填历史任务地址' }}
+          </button>
+        </div>
       </header>
 
-      <div v-if="!['dashboard', 'applyExpert', 'applyProvider', 'taskAudit', 'announcementManage'].includes(currentView)" class="glass-card filter-bar">
+      <div v-if="currentView === 'postManage'" class="glass-card filter-bar">
         <div class="search-input">
           <span class="icon">🔍</span>
           <input v-model="searchName" :placeholder="searchPlaceholder" />
         </div>
 
         <div class="filter-group">
-          <select v-if="currentView === 'users'" v-model="filterRole" class="custom-select">
-            <option value="">所有角色</option>
-            <option value="resident">普通用户</option>
-            <option value="user">普通用户（兼容旧数据）</option>
-            <option value="expert">邻里达人</option>
-            <option value="provider">认证服务者</option>
-            <option value="admin">管理员</option>
-          </select>
-
           <select v-if="currentView === 'postManage'" v-model="processStatusFilter" class="custom-select">
             <option value="all">全部</option>
             <option value="pending">待处理</option>
@@ -136,27 +132,24 @@
 
         <div v-else-if="currentView === 'users'" key="users" class="users-view-panels">
           <div class="glass-card table-card">
-            <div class="card-header"><h3>用户管理 ({{ filteredUsers.length }})</h3></div>
-            <div class="stats-grid">
-              <div class="stat-item">
-                <span class="stat-label">用户总数</span>
-                <span class="stat-value">{{ dashboardStats.total_users || 0 }}</span>
+            <div class="card-header users-card-header">
+              <div class="users-title-row">
+                <h3>用户管理 ({{ filteredUsers.length }})</h3>
+                <button class="btn-ghost" @click="showBlacklistModal = true">查看黑名单</button>
               </div>
-              <div class="stat-item">
-                <span class="stat-label">任务总数</span>
-                <span class="stat-value">{{ dashboardStats.total_tasks || 0 }}</span>
-              </div>
-              <div class="stat-item">
-                <span class="stat-label">完成率</span>
-                <span class="stat-value">{{ dashboardStats.completion_rate || 0 }}%</span>
-              </div>
-              <div class="stat-item">
-                <span class="stat-label">纠纷任务</span>
-                <span class="stat-value">{{ dashboardStats.dispute_tasks || 0 }}</span>
-              </div>
-              <div class="stat-item">
-                <span class="stat-label">黑名单用户</span>
-                <span class="stat-value">{{ dashboardStats.blacklisted_users || 0 }}</span>
+              <div class="users-controls">
+                <div class="search-input mini-search users-search">
+                  <span class="icon">🔍</span>
+                  <input v-model="searchName" placeholder="搜索用户名..." />
+                </div>
+                <select v-model="filterRole" class="custom-select users-role-filter">
+                  <option value="">所有角色</option>
+                  <option value="resident">普通用户</option>
+                  <option value="user">普通用户（兼容旧数据）</option>
+                  <option value="expert">邻里达人</option>
+                  <option value="provider">认证服务者</option>
+                  <option value="admin">管理员</option>
+                </select>
               </div>
             </div>
             <div class="table-wrapper">
@@ -242,10 +235,8 @@
           </div>
         </div>
 
-        <div class="glass-card table-card" v-else-if="currentView === 'applyExpert' || currentView === 'applyProvider'" key="identity-audit">
-          <div class="card-header"><h3>{{ currentView === 'applyExpert' ? '邻里达人审核' : '认证服务者审核' }}</h3></div>
-
-          <div class="audit-card">
+        <div v-else-if="currentView === 'applyExpert' || currentView === 'applyProvider'" key="identity-audit" class="identity-audit-panels">
+          <div class="glass-card table-card">
             <div class="audit-card-header">
               <h4>待处理申请</h4>
               <div class="audit-card-controls pending-controls">
@@ -258,14 +249,21 @@
             <div class="table-wrapper">
               <table class="custom-table">
                 <thead>
-                  <tr><th>申请人</th><th>资历描述</th><th>服务范围</th><th>价格区间</th><th>提交时间</th><th class="center">操作</th></tr>
+                  <tr>
+                    <th>申请人</th>
+                    <th>资历描述</th>
+                    <th>服务范围</th>
+                    <th v-if="currentApplyType === 'provider'">价格区间</th>
+                    <th>提交时间</th>
+                    <th class="center">操作</th>
+                  </tr>
                 </thead>
                 <tbody>
                   <tr v-for="item in paginatedPendingApplications" :key="`pending-${item.id}`">
                     <td class="name-col">{{ item.username }}</td>
                     <td class="reason-col">{{ item.reason }}</td>
                     <td>{{ item.service_scope || '-' }}</td>
-                    <td>{{ formatApplyPrice(item) }}</td>
+                    <td v-if="currentApplyType === 'provider'">{{ formatApplyPrice(item) }}</td>
                     <td>{{ item.created_at }}</td>
                     <td class="action-cols center">
                       <div class="action-btns">
@@ -275,7 +273,7 @@
                     </td>
                   </tr>
                   <tr v-if="pendingApplications.length === 0">
-                    <td colspan="6" class="empty-row">暂无待处理申请</td>
+                    <td :colspan="currentApplyType === 'provider' ? 6 : 5" class="empty-row">暂无待处理申请</td>
                   </tr>
                 </tbody>
               </table>
@@ -287,7 +285,7 @@
             </div>
           </div>
 
-          <div class="audit-card">
+          <div class="glass-card table-card">
             <div class="audit-card-header">
               <h4>历史申请记录</h4>
               <div class="audit-card-controls history-controls">
@@ -305,19 +303,26 @@
             <div class="table-wrapper">
               <table class="custom-table">
                 <thead>
-                  <tr><th>申请人</th><th>资历描述</th><th>服务范围</th><th>价格区间</th><th>状态</th><th>提交时间</th></tr>
+                  <tr>
+                    <th>申请人</th>
+                    <th>资历描述</th>
+                    <th>服务范围</th>
+                    <th v-if="currentApplyType === 'provider'">价格区间</th>
+                    <th>状态</th>
+                    <th>提交时间</th>
+                  </tr>
                 </thead>
                 <tbody>
                   <tr v-for="item in paginatedHistoryApplications" :key="`history-${item.id}`">
                     <td class="name-col">{{ item.username }}</td>
                     <td class="reason-col">{{ item.reason }}</td>
                     <td>{{ item.service_scope || '-' }}</td>
-                    <td>{{ formatApplyPrice(item) }}</td>
+                    <td v-if="currentApplyType === 'provider'">{{ formatApplyPrice(item) }}</td>
                     <td><span :class="['status-pill', item.status]">{{ translateStatus(item.status) }}</span></td>
                     <td>{{ item.created_at }}</td>
                   </tr>
                   <tr v-if="historyApplications.length === 0">
-                    <td colspan="6" class="empty-row">暂无历史申请记录</td>
+                    <td :colspan="currentApplyType === 'provider' ? 6 : 5" class="empty-row">暂无历史申请记录</td>
                   </tr>
                 </tbody>
               </table>
@@ -381,7 +386,10 @@
                 <p class="announcement-content">{{ item.content }}</p>
                 <div class="announcement-item-footer">
                   <span class="announcement-author">发布人：{{ item.author }}</span>
-                  <button class="btn-danger" @click="deleteAnnouncement(item.id)">删除</button>
+                  <div class="announcement-action-group">
+                    <button class="btn-ghost" @click="editAnnouncement(item)">编辑</button>
+                    <button class="btn-danger" @click="deleteAnnouncement(item.id)">删除</button>
+                  </div>
                 </div>
               </div>
               <div v-if="filteredAnnouncements.length === 0" class="announcement-empty">暂无公告</div>
@@ -583,13 +591,31 @@
       <Transition name="zoom">
         <div v-if="showRejectModal" class="modal-overlay" @click.self="closeModal">
           <div class="modal-card reject-view">
-            <div class="modal-header"><h3>请注明拒绝理由</h3></div>
+            <div class="modal-header reject-header">
+              <h3>请注明拒绝理由</h3>
+              <p class="reject-subtitle">{{ rejectModalSubtitle }}</p>
+            </div>
             <div class="modal-body">
-              <textarea v-model="rejectReason" placeholder="该理由将向相关用户公示..." class="styled-textarea"></textarea>
+              <textarea
+                v-model="rejectReason"
+                placeholder="请填写具体原因，例如：资料信息不完整、资质证明不清晰等..."
+                class="styled-textarea reject-textarea"
+                maxlength="300"
+              ></textarea>
+              <div class="reject-meta">
+                <span class="reject-tip">建议写明可改进方向，便于申请人重新提交</span>
+                <span class="reject-count">{{ rejectReasonLength }}/300</span>
+              </div>
             </div>
             <div class="modal-footer">
               <button class="btn-ghost" @click="closeModal">取消</button>
-              <button class="btn-confirm-danger" @click="confirmReject">确认拒绝</button>
+              <button
+                class="btn-confirm-danger"
+                :disabled="!rejectReasonTrimmed"
+                @click="confirmReject"
+              >
+                确认拒绝
+              </button>
             </div>
           </div>
         </div>
@@ -628,6 +654,44 @@
             </div>
             <div v-else class="modal-footer">
               <button class="btn-ghost" @click="showAuditModal = false">关闭视图</button>
+            </div>
+          </div>
+        </div>
+      </Transition>
+
+      <Transition name="zoom">
+        <div v-if="showBlacklistModal" class="modal-overlay" @click.self="showBlacklistModal = false">
+          <div class="modal-card blacklist-view">
+            <div class="modal-header"><h3>黑名单列表</h3></div>
+            <div class="modal-body blacklist-body">
+              <div class="table-wrapper blacklist-table-wrap">
+                <table class="custom-table">
+                  <thead>
+                    <tr>
+                      <th>用户标识</th>
+                      <th>账户名</th>
+                      <th>职能</th>
+                      <th>注册日期</th>
+                      <th>剩余黑名单时间</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="user in blacklistedUsers" :key="`blacklist-${user.id}`">
+                      <td>#{{ user.id }}</td>
+                      <td>{{ user.username }}</td>
+                      <td>{{ formatUserRole(user) }}</td>
+                      <td>{{ user.created_at }}</td>
+                      <td>{{ formatBlacklistRemaining(user.blacklist_until) }}</td>
+                    </tr>
+                    <tr v-if="blacklistedUsers.length === 0">
+                      <td colspan="5" class="empty-row">当前没有黑名单用户</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button class="btn-ghost" @click="showBlacklistModal = false">关闭</button>
             </div>
           </div>
         </div>
@@ -695,6 +759,8 @@ const showRejectModal = ref(false)
 const showDetailModal = ref(false)
 const showTaskDetailModal = ref(false)
 const showAuditModal = ref(false)
+const showBlacklistModal = ref(false)
+const backfillLocationLoading = ref(false)
 const rejectType = ref('')
 const rejectReason = ref('')
 const currentUser = ref('')
@@ -825,6 +891,9 @@ const filteredUsers = computed(() => users.value.filter(u =>
     )
     : true)
 ))
+const blacklistedUsers = computed(() => {
+  return users.value.filter((u) => u.is_blacklisted)
+})
 
 const paginate = (items, page) => {
   const start = (page - 1) * pageSize
@@ -915,6 +984,7 @@ const taskDetailRows = computed(() => {
     { label: '发布方', value: currentTaskDetail.value.creator },
     { label: '接单方', value: currentTaskDetail.value.worker || '暂无' },
     { label: '悬赏积分', value: currentTaskDetail.value.reward_points || 0 },
+    { label: '任务位置', value: currentTaskDetail.value.community_zone || '未填写' },
     {
       label: '任务状态',
       value: currentTaskDetail.value.status ? translateStatus(currentTaskDetail.value.status) : '--',
@@ -1033,6 +1103,27 @@ const fetchDashboardStats = async () => {
     dashboardStatusDistribution.value = {}
   }
 }
+const runTaskLocationBackfill = async () => {
+  if (backfillLocationLoading.value) return
+  if (!confirm('确认执行历史任务地址回填吗？这会批量更新旧任务的位置文本。')) return
+  backfillLocationLoading.value = true
+  try {
+    const res = await axios.post('http://127.0.0.1:8000/api/admin_backfill_task_locations/', {
+      admin_username: adminName.value
+    })
+    if (res.data.code !== 200) {
+      alert(res.data.message || '回填失败')
+      return
+    }
+    const stats = res.data.stats || {}
+    alert(`回填完成：候选 ${stats.total || 0}，更新 ${stats.updated || 0}，跳过 ${stats.skipped || 0}`)
+    if (currentView.value === 'taskAudit') fetchAuditTasks()
+  } catch (error) {
+    alert(error.response?.data?.message || '回填失败')
+  } finally {
+    backfillLocationLoading.value = false
+  }
+}
 const fetchPointTransactions = async (page = 1) => {
   try {
     const res = await axios.get('http://127.0.0.1:8000/api/admin_point_transactions/', {
@@ -1135,6 +1226,33 @@ const deleteAnnouncement = async (id) => {
   })
   if (res.data.code !== 200) {
     alert(res.data.message || '删除失败')
+    return
+  }
+  fetchAnnouncements()
+}
+const editAnnouncement = async (item) => {
+  const nextTitle = prompt('请输入新的公告标题', item.title || '')
+  if (nextTitle === null) return
+  const title = nextTitle.trim()
+  if (!title) {
+    alert('公告标题不能为空')
+    return
+  }
+  const nextContent = prompt('请输入新的公告内容', item.content || '')
+  if (nextContent === null) return
+  const content = nextContent.trim()
+  if (!content) {
+    alert('公告内容不能为空')
+    return
+  }
+  const res = await axios.post('http://127.0.0.1:8000/api/update_announcement/', {
+    username: adminName.value,
+    id: item.id,
+    title,
+    content
+  })
+  if (res.data.code !== 200) {
+    alert(res.data.message || '编辑失败')
     return
   }
   fetchAnnouncements()
@@ -1280,6 +1398,27 @@ const formatUserRole = (u) => {
   if (u.is_provider) return '认证服务者'
   return formatRole(u.role)
 }
+const parseDateTimeText = (value) => {
+  if (!value || typeof value !== 'string') return null
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})$/)
+  if (!match) return null
+  const [, y, m, d, hh, mm, ss] = match
+  return new Date(Number(y), Number(m) - 1, Number(d), Number(hh), Number(mm), Number(ss))
+}
+const formatBlacklistRemaining = (blacklistUntil) => {
+  if (!blacklistUntil) return '永久'
+  const endAt = parseDateTimeText(blacklistUntil)
+  if (!endAt) return blacklistUntil
+  const diff = endAt.getTime() - Date.now()
+  if (diff <= 0) return '已到期'
+  const totalMinutes = Math.floor(diff / 60000)
+  const days = Math.floor(totalMinutes / (24 * 60))
+  const hours = Math.floor((totalMinutes % (24 * 60)) / 60)
+  const minutes = totalMinutes % 60
+  if (days > 0) return `${days}天${hours}小时`
+  if (hours > 0) return `${hours}小时${minutes}分钟`
+  return `${Math.max(1, minutes)}分钟`
+}
 const formatApplyType = (t) => ({ expert: '邻里达人', provider: '认证服务者' }[t] || '邻里达人')
 const formatApplyPrice = (item) => {
   if (item?.apply_type === 'provider') {
@@ -1292,6 +1431,12 @@ const formatApplyPrice = (item) => {
 }
 const formatCategory = (c) => ({ errand: '跑腿', repair: '维修', pet: '宠物' }[c] || '互助')
 const isProcessed = (s) => ['pending', 'rejected', 'finished'].includes(s)
+const rejectReasonTrimmed = computed(() => rejectReason.value.trim())
+const rejectReasonLength = computed(() => rejectReason.value.length)
+const rejectModalSubtitle = computed(() => {
+  if (rejectType.value === 'user') return '该理由将同步给申请人，请尽量明确且可执行。'
+  return '该理由将反馈给发帖人，请简要描述拒绝依据。'
+})
 
 const openDetailModal = (post) => { currentPostDetail.value = post; showDetailModal.value = true }
 const closeDetailModal = () => { showDetailModal.value = false }
@@ -1324,15 +1469,16 @@ onMounted(refreshData)
 /* 头部 */
 .content-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 30px; }
 .content-header h1 { font-size: 32px; color: #111827; font-weight: 700; }
+.header-actions { margin-left: 12px; }
 .subtitle { color: #6b7280; font-size: 16px; margin-top: 8px; }
 
 /* 过滤栏 */
 .glass-card { background: rgba(255, 255, 255, 0.8); backdrop-filter: blur(10px); border-radius: 24px; border: 1px solid rgba(255, 255, 255, 0.5); }
-.filter-bar { display: flex; justify-content: space-between; align-items: center; padding: 15px 25px; margin-bottom: 30px; }
-.search-input { position: relative; flex: 1; max-width: 400px; }
+.filter-bar { display: flex; justify-content: space-between; align-items: center; padding: 15px 25px; margin-bottom: 30px; gap: 12px; flex-wrap: wrap; }
+.search-input { position: relative; flex: 1 1 320px; max-width: 400px; min-width: 0; }
 .search-input input { width: 100%; padding: 12px 15px 12px 45px; border-radius: 14px; border: 1px solid #e2ece7; outline: none; }
 .search-input .icon { position: absolute; left: 15px; top: 50%; transform: translateY(-50%); opacity: 0.5; }
-.filter-group { display: flex; gap: 12px; }
+.filter-group { display: flex; gap: 12px; margin-left: auto; flex-wrap: wrap; }
 .custom-select { padding: 10px 15px; border-radius: 12px; border: 1px solid #e2ece7; font-size: 14px; outline: none; cursor: pointer; }
 
 /* 表格样式 */
@@ -1511,6 +1657,41 @@ onMounted(refreshData)
   flex-direction: column;
   gap: 22px;
 }
+.users-card-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  justify-content: space-between;
+  min-width: 0;
+}
+.users-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.users-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+  min-width: 0;
+}
+.users-search {
+  width: 300px !important;
+  min-width: 220px;
+  max-width: 300px !important;
+  flex: 0 1 300px !important;
+}
+.users-role-filter {
+  min-width: 140px;
+  flex: 0 0 140px;
+}
+.identity-audit-panels {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
 .announcement-manage-panels {
   display: flex;
   flex-direction: column;
@@ -1518,20 +1699,24 @@ onMounted(refreshData)
 }
 .announcement-list-header {
   align-items: center;
+  gap: 12px;
 }
 .announcement-tools {
   display: flex;
   align-items: center;
   gap: 10px;
+  margin-left: auto;
+  min-width: 0;
 }
 .announcement-search {
   width: 300px !important;
-  min-width: 300px;
+  min-width: 220px;
   max-width: 300px !important;
-  flex: 0 0 300px !important;
+  flex: 0 1 300px !important;
 }
 .announcement-author-filter {
   min-width: 140px;
+  flex: 0 0 140px;
 }
 .custom-table { width: 100%; border-collapse: collapse; }
 .custom-table th { text-align: left; padding: 15px; color: #889891; border-bottom: 2px solid #f0f4f2; }
@@ -1560,15 +1745,17 @@ onMounted(refreshData)
   display: flex;
   align-items: center;
   gap: 10px;
+  margin-left: auto;
+  min-width: 0;
 }
 .export-btn {
   white-space: nowrap;
 }
 .points-search {
   width: 300px !important;
-  min-width: 300px;
+  min-width: 220px;
   max-width: 300px !important;
-  flex: 0 0 300px !important;
+  flex: 0 1 300px !important;
 }
 .points-change {
   display: inline-block;
@@ -1619,10 +1806,11 @@ onMounted(refreshData)
 }
 .task-card-header {
   display: flex;
-  justify-content: flex-start;
+  justify-content: space-between;
   align-items: center;
   gap: 12px;
   margin-bottom: 8px;
+  min-width: 0;
 }
 .task-card-header h3 {
   flex: 1 1 auto;
@@ -1633,11 +1821,11 @@ onMounted(refreshData)
 }
 .task-mini-search {
   width: 320px !important;
-  min-width: 320px;
+  min-width: 220px;
   max-width: 320px !important;
-  flex: 0 0 320px !important;
+  flex: 0 1 320px !important;
   margin-left: auto;
-  margin-right: 16px;
+  margin-right: 0;
   box-sizing: border-box;
 }
 .task-card-header .task-mini-search input {
@@ -1646,6 +1834,24 @@ onMounted(refreshData)
 }
 
 @media (max-width: 1200px) {
+  .users-card-header {
+    flex-wrap: wrap;
+  }
+  .users-title-row {
+    width: 100%;
+    justify-content: space-between;
+  }
+  .users-controls {
+    width: 100%;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+  }
+  .users-search {
+    width: 80% !important;
+    min-width: 0;
+    max-width: 360px !important;
+    flex: 1 1 320px !important;
+  }
   .today-kpi-grid {
     grid-template-columns: repeat(2, minmax(120px, 1fr));
   }
@@ -1780,6 +1986,11 @@ onMounted(refreshData)
   justify-content: space-between;
   align-items: center;
 }
+.announcement-action-group {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
 .announcement-author {
   color: #94a3b8;
   font-size: 12px;
@@ -1806,11 +2017,14 @@ onMounted(refreshData)
   flex-wrap: nowrap;
   margin-bottom: 10px;
   gap: 12px;
+  min-width: 0;
 }
 .audit-card-header h4 {
   margin: 0;
   color: #1a4d38;
   font-size: 16px;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 .audit-card-controls {
   margin-left: auto;
@@ -1819,30 +2033,32 @@ onMounted(refreshData)
   justify-content: flex-end;
   gap: 10px;
   flex-wrap: nowrap;
+  min-width: 0;
+  flex: 0 1 auto;
 }
 .audit-card-controls .search-input {
-  flex: 0 0 auto;
-  max-width: none;
+  flex: 0 1 auto;
+  max-width: 100%;
 }
 .pending-controls {
   width: auto;
   min-width: 0;
-  flex: 0 0 auto;
-  margin-right: 12px;
+  flex: 0 1 auto;
+  margin-right: 0;
   box-sizing: border-box;
 }
 .history-controls {
   width: auto;
   min-width: 0;
-  flex: 0 0 auto;
-  margin-right: 12px;
+  flex: 0 1 auto;
+  margin-right: 0;
 }
 .mini-search {
   width: 320px !important;
-  min-width: 320px;
+  min-width: 220px;
   max-width: 320px !important;
-  flex: 0 0 320px !important;
-  margin-right: 8px;
+  flex: 0 1 320px !important;
+  margin-right: 0;
   box-sizing: border-box;
 }
 .mini-search input {
@@ -1861,6 +2077,10 @@ onMounted(refreshData)
 }
 
 @media (max-width: 1200px) {
+  .filter-group {
+    width: 100%;
+    justify-content: flex-end;
+  }
   .audit-card-header {
     flex-wrap: wrap;
   }
@@ -1880,9 +2100,9 @@ onMounted(refreshData)
   }
   .mini-search {
     width: 80% !important;
-    max-width: 320px !important;
+    max-width: 360px !important;
     min-width: 0;
-    flex: 0 1 320px !important;
+    flex: 1 1 320px !important;
   }
   .history-status-select {
     width: 140px;
@@ -1941,6 +2161,48 @@ onMounted(refreshData)
   overflow: hidden; /* 防止内容溢出圆角 */
   transition: all 0.3s ease;
   max-height: 90vh;
+}
+.modal-header {
+  padding: 24px 26px 0;
+}
+.modal-header h3 {
+  margin: 0;
+  color: #111827;
+  font-size: 22px;
+}
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 0 26px 24px;
+}
+
+.blacklist-view {
+  width: min(980px, 92vw);
+  max-height: 86vh;
+}
+.reject-view {
+  width: min(560px, 92vw);
+}
+.reject-view .modal-body {
+  padding: 10px 26px 12px;
+}
+.reject-header {
+  padding-top: 22px;
+}
+.reject-subtitle {
+  margin: 8px 0 0;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.blacklist-body {
+  max-height: 62vh;
+  padding: 12px 26px;
+}
+.blacklist-table-wrap {
+  max-height: 58vh;
+  overflow-y: auto;
 }
 
 /* --- 变体 B：任务审批弹窗 (精简紧致) --- */
@@ -2022,6 +2284,47 @@ onMounted(refreshData)
   font-size: 14px;
   outline-color: #10b981;
   margin: 10px 0;
+}
+.reject-textarea {
+  min-height: 170px;
+  margin: 8px 0 6px;
+  resize: vertical;
+  line-height: 1.7;
+  box-sizing: border-box;
+}
+.reject-textarea:focus {
+  border-color: #10b981;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.16);
+}
+.reject-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 2px;
+}
+.reject-tip {
+  color: #94a3b8;
+  font-size: 12px;
+}
+.reject-count {
+  color: #64748b;
+  font-size: 12px;
+  min-width: 56px;
+  text-align: right;
+}
+.btn-confirm-danger {
+  border: none;
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+  color: #fff;
+  border-radius: 10px;
+  padding: 8px 16px;
+  cursor: pointer;
+  font-weight: 600;
+}
+.btn-confirm-danger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* ============================================================

@@ -144,7 +144,15 @@
               <input v-model="providerPriceMax" type="number" min="0" step="1" placeholder="最高价格（元，仅数字）" />
             </div>
             <input v-if="applyType === 'provider'" v-model="providerIntro" placeholder="简介（可选）" />
-            <input v-else v-model="pricingNote" placeholder="定价参考（可选，如：上门检测30元起）" />
+            <div class="upload-box">
+              <label class="upload-label">资质证明图片（可选，jpg/png，≤5MB）</label>
+              <input
+                type="file"
+                accept=".jpg,.jpeg,.png,image/jpeg,image/png"
+                @change="handleApplicationImageChange"
+              />
+              <p v-if="applicationImageName" class="upload-tip">已选择：{{ applicationImageName }}</p>
+            </div>
             <button class="btn-primary" @click="handleApply">提交申请</button>
           </div>
         </div>
@@ -166,6 +174,7 @@
                   <th>审核时间</th>
                   <th>服务范围</th>
                   <th>价格区间</th>
+                  <th>附件</th>
                   <th>拒绝理由</th>
                 </tr>
               </thead>
@@ -181,6 +190,7 @@
                   <td class="time-col">{{ item.reviewed_at || '-' }}</td>
                   <td>{{ item.service_scope || '-' }}</td>
                   <td>{{ formatApplyPrice(item) }}</td>
+                  <td>{{ item.has_application_image ? (item.application_image_name || '已上传') : '-' }}</td>
                   <td class="reason-col">{{ item.reject_reason || '-' }}</td>
                 </tr>
               </tbody>
@@ -308,10 +318,11 @@ const providerStatus = ref('none')
 const applyType = ref('expert')
 const reason = ref('')
 const serviceScope = ref('')
-const pricingNote = ref('')
 const providerPriceMin = ref('')
 const providerPriceMax = ref('')
 const providerIntro = ref('')
+const applicationImageName = ref('')
+const applicationImageData = ref('')
 const selectedDirections = ref([])
 const selectedTimes = ref([])
 const directionOptions = ['家电维修', '管道疏通', '电路检修', '搬运服务', '保洁服务', '家居安装', '上门做饭', '宠物照护']
@@ -427,25 +438,68 @@ const handleApply = async () => {
     apply_type: applyType.value,
     reason: reason.value,
     service_scope: serviceScope.value,
-    pricing_note: pricingNote.value,
-  provider_service_directions: selectedDirections.value,
-  provider_service_times: selectedTimes.value,
+    provider_service_directions: selectedDirections.value,
+    provider_service_times: selectedTimes.value,
     provider_price_min: providerPriceMin.value,
     provider_price_max: providerPriceMax.value,
-    provider_intro: providerIntro.value
+    provider_intro: providerIntro.value,
+    application_image_name: applicationImageName.value,
+    application_image_data: applicationImageData.value
   })
-  alert(res.data.message)
+  if (res.data.code !== 200) {
+    alert(res.data.message || '申请提交失败')
+    return
+  }
+  alert(res.data.message || '申请提交成功')
   reason.value = ''
   serviceScope.value = ''
-  pricingNote.value = ''
   providerPriceMin.value = ''
   providerPriceMax.value = ''
   providerIntro.value = ''
+  applicationImageName.value = ''
+  applicationImageData.value = ''
   selectedDirections.value = []
   selectedTimes.value = []
   await fetchMyApplication('expert')
   await fetchMyApplication('provider')
   await fetchApplicationHistory()
+}
+
+const handleApplicationImageChange = (event) => {
+  const file = event?.target?.files?.[0]
+  if (!file) {
+    applicationImageName.value = ''
+    applicationImageData.value = ''
+    return
+  }
+  const allowedTypes = ['image/jpeg', 'image/png']
+  const lowerName = (file.name || '').toLowerCase()
+  const validExt = lowerName.endsWith('.jpg') || lowerName.endsWith('.jpeg') || lowerName.endsWith('.png')
+  if (!allowedTypes.includes(file.type) || !validExt) {
+    alert('图片格式仅支持 jpg 或 png')
+    event.target.value = ''
+    applicationImageName.value = ''
+    applicationImageData.value = ''
+    return
+  }
+  if (file.size > 5 * 1024 * 1024) {
+    alert('图片大小不能超过 5MB')
+    event.target.value = ''
+    applicationImageName.value = ''
+    applicationImageData.value = ''
+    return
+  }
+  const reader = new FileReader()
+  reader.onload = () => {
+    applicationImageName.value = file.name
+    applicationImageData.value = typeof reader.result === 'string' ? reader.result : ''
+  }
+  reader.onerror = () => {
+    alert('图片读取失败，请重试')
+    applicationImageName.value = ''
+    applicationImageData.value = ''
+  }
+  reader.readAsDataURL(file)
 }
 
 const toggleDirection = (value) => {
@@ -823,6 +877,31 @@ onMounted(() => {
   border-color: #2563eb;
   background: #dbeafe;
   color: #1d4ed8;
+}
+.upload-box {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.upload-label {
+  color: #334155;
+  font-size: 13px;
+  font-weight: 600;
+}
+.upload-box input[type='file'] {
+  border: 1px dashed #cbd5e1;
+  border-radius: 10px;
+  background: #fff;
+  padding: 10px 12px;
+}
+.upload-tip {
+  margin: 0;
+  font-size: 12px;
+  color: #64748b;
 }
 .edit-provider-btn {
   border: 1px solid #93c5fd;

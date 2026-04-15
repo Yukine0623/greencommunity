@@ -441,6 +441,7 @@ const detailRows = computed(() => {
       badgeType: currentTask.value.status || 'default'
     },
     { label: '悬赏积分', value: currentTask.value.reward_points ?? 0 },
+    { label: '任务位置', value: currentTask.value.community_zone || '未填写' },
     { label: '发布时间', value: currentTask.value.created_at },
     { label: '发布人', value: currentTask.value.creator },
     { label: '接单人', value: currentTask.value.worker, visible: userRole.value !== 'resident' },

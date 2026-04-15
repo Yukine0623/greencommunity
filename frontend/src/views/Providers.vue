@@ -152,6 +152,50 @@
             <label>悬赏积分</label>
             <input v-model.number="inviteForm.reward_points" type="number" min="1" step="1" />
           </div>
+          <div class="form-item">
+            <label>任务位置（可选）</label>
+            <input
+              v-model="inviteForm.community_zone"
+              type="text"
+              maxlength="100"
+              placeholder="例如：A区3号楼附近（可手动填写）"
+            />
+            <div class="location-manual-grid">
+              <input
+                v-model.number="inviteForm.latitude"
+                type="number"
+                step="0.000001"
+                min="-90"
+                max="90"
+                placeholder="纬度（可选）"
+              />
+              <input
+                v-model.number="inviteForm.longitude"
+                type="number"
+                step="0.000001"
+                min="-180"
+                max="180"
+                placeholder="经度（可选）"
+              />
+            </div>
+            <div class="location-actions">
+              <button class="btn-location" type="button" @click="handleGetInviteLocation">获取当前位置</button>
+              <button
+                v-if="inviteForm.latitude !== null || inviteForm.longitude !== null || inviteForm.community_zone"
+                class="btn-location-clear"
+                type="button"
+                @click="clearInviteLocation"
+              >
+                清除位置
+              </button>
+            </div>
+            <p
+              v-if="inviteForm.latitude !== null && inviteForm.longitude !== null"
+              class="location-value"
+            >
+              已获取：{{ inviteForm.latitude }}, {{ inviteForm.longitude }}
+            </p>
+          </div>
           <div class="modal-footer">
             <button class="btn-ghost" @click="showInviteModal = false">取消</button>
             <button class="btn-primary" @click="submitInvite">发送邀约</button>
@@ -186,7 +230,10 @@ const inviteForm = ref({
   category: 'repair',
   content: '',
   reward_points: 10,
-  invited_provider_username: ''
+  invited_provider_username: '',
+  community_zone: '',
+  latitude: null,
+  longitude: null
 })
 
 const fetchProviders = async () => {
@@ -257,7 +304,10 @@ const openInviteModal = (username) => {
     category: 'repair',
     content: '',
     reward_points: 10,
-    invited_provider_username: username
+    invited_provider_username: username,
+    community_zone: '',
+    latitude: null,
+    longitude: null
   }
   showInviteModal.value = true
 }
@@ -278,7 +328,10 @@ const submitInvite = async () => {
     content: inviteForm.value.content,
     reward_points: Number(inviteForm.value.reward_points || 10),
     assignee_type: 'provider',
-    invited_provider_username: inviteForm.value.invited_provider_username
+    invited_provider_username: inviteForm.value.invited_provider_username,
+    community_zone: inviteForm.value.community_zone,
+    latitude: inviteForm.value.latitude,
+    longitude: inviteForm.value.longitude
   })
   if (res.data.code !== 200) {
     alert(res.data.message || '发送邀约失败')
@@ -289,6 +342,30 @@ const submitInvite = async () => {
   }
   alert(res.data.message || '邀约任务已提交审核')
   showInviteModal.value = false
+}
+const handleGetInviteLocation = () => {
+  if (!navigator.geolocation) {
+    alert('当前浏览器不支持定位')
+    return
+  }
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      inviteForm.value.latitude = Number(pos.coords.latitude.toFixed(6))
+      inviteForm.value.longitude = Number(pos.coords.longitude.toFixed(6))
+      if (!inviteForm.value.community_zone?.trim()) {
+        inviteForm.value.community_zone = '当前位置'
+      }
+    },
+    () => {
+      alert('定位失败，请检查浏览器定位权限')
+    },
+    { enableHighAccuracy: true, timeout: 8000 }
+  )
+}
+const clearInviteLocation = () => {
+  inviteForm.value.community_zone = ''
+  inviteForm.value.latitude = null
+  inviteForm.value.longitude = null
 }
 
 onMounted(() => {
@@ -411,9 +488,42 @@ onBeforeUnmount(() => {
 .form-item { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
 .form-item input, .form-item select, .form-item textarea { border: 1px solid #dbe3eb; border-radius: 10px; padding: 10px; }
 .form-item textarea { min-height: 90px; resize: vertical; }
+.location-manual-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.location-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.btn-location,
+.btn-location-clear {
+  border: 1px solid #dbe3eb;
+  background: #fff;
+  color: #334155;
+  border-radius: 10px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+.btn-location-clear {
+  color: #7f1d1d;
+  border-color: #fecaca;
+  background: #fff5f5;
+}
+.location-value {
+  margin: 0;
+  color: #64748b;
+  font-size: 12px;
+}
 .modal-footer { display: flex; justify-content: flex-end; gap: 10px; }
 .detail-row { display: flex; gap: 10px; margin-bottom: 10px; }
 .detail-row .k { min-width: 72px; color: #64748b; font-size: 13px; }
 .detail-row .v { color: #0f172a; font-size: 14px; line-height: 1.5; }
-@media (max-width: 1100px) { .providers-grid { grid-template-columns: 1fr; } }
+@media (max-width: 1100px) {
+  .providers-grid { grid-template-columns: 1fr; }
+  .location-manual-grid { grid-template-columns: 1fr; }
+}
 </style>

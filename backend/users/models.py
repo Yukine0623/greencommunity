@@ -78,6 +78,8 @@ class ExpertApplication(models.Model):
     provider_service_times = models.CharField(max_length=120, null=True, blank=True, verbose_name='认证服务者服务时间标签')
     provider_price_range = models.CharField(max_length=120, null=True, blank=True, verbose_name='认证服务者价格区间')
     provider_intro = models.TextField(null=True, blank=True, verbose_name='认证服务者简介')
+    application_image_name = models.CharField(max_length=255, null=True, blank=True, verbose_name='申请附件图片名')
+    application_image_data = models.TextField(null=True, blank=True, verbose_name='申请附件图片Base64')
 
     status = models.CharField(max_length=20, default='pending')     # pending / approved / rejected
 

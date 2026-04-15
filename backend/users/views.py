@@ -1,6 +1,7 @@
 from django.db.models import Q, Count, Avg
 from django.views.decorators.csrf import csrf_exempt
 from django.http import JsonResponse, HttpResponse
+from django.conf import settings
 from .models import User, Post, ExpertApplication, PostHistory, Task, PointTransaction, Announcement, ChatMessage, TaskQuote, TaskReview, AuditLog, BlacklistAppeal
 from django.utils.timezone import now
 from datetime import timedelta
@@ -13,6 +14,12 @@ from django.views.decorators.http import require_POST
 #from .models import Task, PointTransaction, User
 import json
 import csv
+import hashlib
+import base64
+import binascii
+import ssl
+from urllib.parse import urlencode
+from urllib.request import urlopen
 
 
 AUTO_ACCEPT_MINUTES = 5
@@ -99,6 +106,160 @@ def log_audit(action, actor=None, target_type=None, target_id=None, detail=None)
 
 def can_user_manage_task(user, task):
     return task.creator_id == user.id and task.status in {'auditing', 'pending', 'rejected'}
+
+
+def _safe_float(value):
+    if value in (None, ''):
+        return None
+    try:
+        return float(value)
+    except Exception:
+        return None
+
+
+def reverse_geocode_amap(latitude, longitude):
+    """
+    使用高德逆地理编码把经纬度转成可读地址。
+    返回地址字符串；失败时返回 None。
+    """
+    debug = reverse_geocode_amap_debug(latitude, longitude)
+    return debug.get('address')
+
+
+def reverse_geocode_amap_debug(latitude, longitude):
+    key = (getattr(settings, 'AMAP_WEB_API_KEY', '') or '').strip()
+    secret = (getattr(settings, 'AMAP_WEB_API_SECRET', '') or '').strip()
+    lat = _safe_float(latitude)
+    lng = _safe_float(longitude)
+    debug = {
+        'ok': False,
+        'address': None,
+        'reason': None,
+        'attempts': [],
+        'has_key': bool(key),
+        'has_secret': bool(secret),
+        'lat': lat,
+        'lng': lng,
+    }
+    if not key:
+        debug['reason'] = 'missing_key'
+        return debug
+    if lat is None or lng is None:
+        debug['reason'] = 'invalid_lat_lng'
+        return debug
+
+    try:
+        def _fetch_json(target_url):
+            """
+            先走标准 SSL 校验；
+            若证书校验失败且允许回退，则使用不校验证书上下文重试一次。
+            """
+            try:
+                with urlopen(target_url, timeout=4) as resp:
+                    return json.loads(resp.read().decode('utf-8')), False
+            except Exception as e:
+                message = str(e)
+                cert_failed = 'CERTIFICATE_VERIFY_FAILED' in message
+                allow_insecure = bool(getattr(settings, 'AMAP_ALLOW_INSECURE_SSL', False))
+                if cert_failed and allow_insecure:
+                    insecure_ctx = ssl._create_unverified_context()
+                    with urlopen(target_url, timeout=4, context=insecure_ctx) as resp:
+                        return json.loads(resp.read().decode('utf-8')), True
+                raise
+
+        base_params = {
+            'key': key,
+            'location': f'{lng:.6f},{lat:.6f}',
+            'extensions': 'base',
+            'output': 'json'
+        }
+        endpoint_path = '/v3/geocode/regeo'
+
+        # 同时尝试保序和排序两种参数串，规避签名规则差异
+        ordered_items = list(base_params.items())
+        sorted_items = sorted(base_params.items())
+        query_variants = [
+            ('ordered', ordered_items),
+            ('sorted', sorted_items),
+        ]
+
+        urls_to_try = []
+        for label, items in query_variants:
+            raw_query = '&'.join([f'{k}={v}' for k, v in items])
+            encoded_query = urlencode(items)
+            if secret:
+                sig_raw = hashlib.md5(f"{endpoint_path}?{raw_query}{secret}".encode('utf-8')).hexdigest()
+                urls_to_try.append((f'{label}_signed_raw', f"https://restapi.amap.com{endpoint_path}?{encoded_query}&sig={sig_raw}"))
+                sig_encoded = hashlib.md5(f"{endpoint_path}?{encoded_query}{secret}".encode('utf-8')).hexdigest()
+                urls_to_try.append((f'{label}_signed_encoded', f"https://restapi.amap.com{endpoint_path}?{encoded_query}&sig={sig_encoded}"))
+            urls_to_try.append((f'{label}_plain', f"https://restapi.amap.com{endpoint_path}?{encoded_query}"))
+
+        for mode, url in urls_to_try:
+            attempt = {'mode': mode, 'status': None, 'info': None, 'infocode': None}
+            try:
+                payload, insecure_used = _fetch_json(url)
+                attempt['status'] = payload.get('status')
+                attempt['info'] = payload.get('info')
+                attempt['infocode'] = payload.get('infocode')
+                attempt['insecure_ssl_used'] = insecure_used
+                debug['attempts'].append(attempt)
+
+                if str(payload.get('status')) == '1':
+                    regeocode = payload.get('regeocode') or {}
+                    formatted = (regeocode.get('formatted_address') or '').strip()
+                    if formatted:
+                        debug['ok'] = True
+                        debug['address'] = formatted
+                        return debug
+            except Exception as e:
+                attempt['error'] = str(e)
+                debug['attempts'].append(attempt)
+
+        debug['reason'] = 'all_attempts_failed'
+        return debug
+    except Exception as e:
+        debug['reason'] = f'exception:{e}'
+        return debug
+
+
+def should_resolve_zone(text):
+    zone = (text or '').strip()
+    return (not zone) or zone == '当前位置' or zone.startswith('约 ')
+
+
+def resolve_community_zone(community_zone, latitude, longitude):
+    """
+    优先使用手填地址；
+    若为空或“当前位置”，尝试高德逆地理编码；
+    再失败则回退为坐标附近描述。
+    """
+    text = (community_zone or '').strip()
+    if not should_resolve_zone(text):
+        return text
+
+    resolved = reverse_geocode_amap(latitude, longitude)
+    if resolved:
+        return resolved
+
+    lat = _safe_float(latitude)
+    lng = _safe_float(longitude)
+    if lat is not None and lng is not None:
+        return f"约 {lat:.2f}, {lng:.2f} 附近"
+    return None
+
+
+@csrf_exempt
+def geocode_debug(request):
+    """
+    调试接口：查看高德逆地理编码失败原因
+    GET /api/geocode_debug/?lat=31.23&lng=121.47
+    """
+    if request.method != 'GET':
+        return JsonResponse({'code': 405, 'message': '只支持GET'})
+    lat = request.GET.get('lat')
+    lng = request.GET.get('lng')
+    debug = reverse_geocode_amap_debug(lat, lng)
+    return JsonResponse({'code': 200, 'debug': debug})
 
 
 def can_user_request_termination(username, task):
@@ -398,6 +559,39 @@ def delete_announcement(request):
 
     announcement.delete()
     return JsonResponse({'code': 200, 'message': '公告已删除'})
+
+
+@csrf_exempt
+def update_announcement(request):
+    if request.method != 'POST':
+        return JsonResponse({'code': 405, 'message': '只支持POST'})
+
+    try:
+        data = json.loads(request.body)
+        username = (data.get('username') or '').strip()
+        announcement_id = data.get('id')
+        title = (data.get('title') or '').strip()
+        content = (data.get('content') or '').strip()
+    except Exception:
+        return JsonResponse({'code': 400, 'message': '请求数据格式错误'})
+
+    if not username or not announcement_id:
+        return JsonResponse({'code': 400, 'message': '参数不完整'})
+    if not title or not content:
+        return JsonResponse({'code': 400, 'message': '公告标题和内容不能为空'})
+
+    user = User.objects.filter(username=username).first()
+    if not user or user.role != 'admin':
+        return JsonResponse({'code': 403, 'message': '只有管理员可以编辑公告'})
+
+    announcement = Announcement.objects.filter(id=announcement_id).first()
+    if not announcement:
+        return JsonResponse({'code': 404, 'message': '公告不存在'})
+
+    announcement.title = title
+    announcement.content = content
+    announcement.save(update_fields=['title', 'content'])
+    return JsonResponse({'code': 200, 'message': '公告已更新'})
 
 
 @csrf_exempt
@@ -709,6 +903,8 @@ def apply_expert(request):
         provider_price_min = data.get('provider_price_min')
         provider_price_max = data.get('provider_price_max')
         provider_intro = (data.get('provider_intro') or '').strip()
+        application_image_name = (data.get('application_image_name') or '').strip()
+        application_image_data = (data.get('application_image_data') or '').strip()
 
         # 参数校验
         if apply_type not in {'expert', 'provider'}:
@@ -720,6 +916,25 @@ def apply_expert(request):
             })
         if apply_type == 'provider' and not service_scope:
             return JsonResponse({'code': 400, 'message': '认证服务者请填写服务范围'})
+        if bool(application_image_name) != bool(application_image_data):
+            return JsonResponse({'code': 400, 'message': '图片数据不完整，请重新上传'})
+        if application_image_data:
+            lower_name = application_image_name.lower()
+            if not (lower_name.endswith('.jpg') or lower_name.endswith('.jpeg') or lower_name.endswith('.png')):
+                return JsonResponse({'code': 400, 'message': '图片格式仅支持 jpg/png'})
+            if not (
+                application_image_data.startswith('data:image/jpeg;base64,')
+                or application_image_data.startswith('data:image/jpg;base64,')
+                or application_image_data.startswith('data:image/png;base64,')
+            ):
+                return JsonResponse({'code': 400, 'message': '图片格式仅支持 jpg/png'})
+            try:
+                raw_base64 = application_image_data.split(',', 1)[1]
+                raw_bytes = base64.b64decode(raw_base64, validate=True)
+            except (IndexError, binascii.Error, ValueError):
+                return JsonResponse({'code': 400, 'message': '图片数据无效，请重新上传'})
+            if len(raw_bytes) > 5 * 1024 * 1024:
+                return JsonResponse({'code': 400, 'message': '图片大小不能超过5MB'})
         if apply_type == 'provider':
             if not provider_service_directions:
                 return JsonResponse({'code': 400, 'message': '认证服务者请至少选择一个服务方向'})
@@ -776,6 +991,8 @@ def apply_expert(request):
             provider_service_times=','.join(provider_service_times) if provider_service_times else None,
             provider_price_range=provider_price_range,
             provider_intro=provider_intro or None,
+            application_image_name=application_image_name or None,
+            application_image_data=application_image_data or None,
             status='pending'   # 明确写一下（更规范）
         )
 
@@ -825,7 +1042,9 @@ def get_my_application(request):
             'provider_price_range': app.provider_price_range,
             'provider_price_min': parse_price_range(app.provider_price_range)[0],
             'provider_price_max': parse_price_range(app.provider_price_range)[1],
-            'provider_intro': app.provider_intro
+            'provider_intro': app.provider_intro,
+            'application_image_name': app.application_image_name,
+            'has_application_image': bool(app.application_image_data)
         })
 
     except Exception as e:
@@ -943,6 +1162,8 @@ def application_list(request):
             'provider_price_min': parse_price_range(item.provider_price_range)[0],
             'provider_price_max': parse_price_range(item.provider_price_range)[1],
             'provider_intro': item.provider_intro,
+            'application_image_name': item.application_image_name,
+            'has_application_image': bool(item.application_image_data),
             'status': item.status,
             'created_at': item.created_at.strftime('%Y-%m-%d %H:%M:%S')
         })
@@ -1014,6 +1235,8 @@ def my_application_history(request):
             'provider_price_min': parse_price_range(item.provider_price_range)[0],
             'provider_price_max': parse_price_range(item.provider_price_range)[1],
             'provider_intro': item.provider_intro,
+            'application_image_name': item.application_image_name,
+            'has_application_image': bool(item.application_image_data),
             'created_at': item.created_at.strftime('%Y-%m-%d %H:%M:%S'),
             'reviewed_at': item.reviewed_at.strftime('%Y-%m-%d %H:%M:%S') if item.reviewed_at else None,
             'reject_reason': item.reject_reason
@@ -1201,6 +1424,14 @@ def get_tasks(request):
         # 定向邀约任务：只有发布者本人和被邀约认证服务者可见
         if t.invited_provider_id and username not in {t.creator.username, t.invited_provider.username}:
             continue
+
+        # 历史任务回填：若位置仍是“约经纬度附近”，尝试逆地理编码并缓存
+        if should_resolve_zone(t.community_zone) and t.latitude is not None and t.longitude is not None:
+            resolved_zone = resolve_community_zone(t.community_zone, t.latitude, t.longitude)
+            if resolved_zone and resolved_zone != t.community_zone:
+                Task.objects.filter(id=t.id).update(community_zone=resolved_zone)
+                t.community_zone = resolved_zone
+
         distance_km = None
         if user_lat and user_lng and t.latitude is not None and t.longitude is not None:
             try:
@@ -1235,6 +1466,8 @@ def get_tasks(request):
             'assignee_type': t.assignee_type or 'any',
             'invited_provider': t.invited_provider.username if t.invited_provider else None,
             'community_zone': t.community_zone,
+            'latitude': float(t.latitude) if t.latitude is not None else None,
+            'longitude': float(t.longitude) if t.longitude is not None else None,
             'distance_km': distance_km,
             'creator_completion_rate': completion_rate,
             'creator_response_hours': response_hours,
@@ -1298,11 +1531,7 @@ def create_task(request):
                     return JsonResponse({'code': 400, 'message': '被邀约对象不存在或不是认证服务者'})
                 assignee_type = 'provider'
 
-            if not community_zone and latitude is not None and longitude is not None:
-                try:
-                    community_zone = f"约 {float(latitude):.2f}, {float(longitude):.2f} 附近"
-                except Exception:
-                    community_zone = None
+            community_zone = resolve_community_zone(community_zone, latitude, longitude)
             hits = detect_sensitive_keywords(data.get('title'), data.get('content'), community_zone)
 
             with transaction.atomic():
@@ -1701,6 +1930,7 @@ def update_task(request):
 
         latitude = data.get('latitude') if 'latitude' in data else task.latitude
         longitude = data.get('longitude') if 'longitude' in data else task.longitude
+        community_zone = resolve_community_zone(community_zone, latitude, longitude)
         hits = detect_sensitive_keywords(title, content, community_zone)
 
         task.title = title
@@ -1941,6 +2171,9 @@ def get_audit_tasks(request):
             'terminate_reject_reason': t.terminate_reject_reason,
             'terminate_creator_points': t.terminate_creator_points,
             'terminate_worker_points': t.terminate_worker_points,
+            'community_zone': t.community_zone,
+            'latitude': float(t.latitude) if t.latitude is not None else None,
+            'longitude': float(t.longitude) if t.longitude is not None else None,
             'created_at': t.created_at.strftime('%Y-%m-%d %H:%M')
         })
     return JsonResponse({'code': 200, 'tasks': data})
@@ -2522,6 +2755,65 @@ def update_provider_profile(request):
     )
 
     return JsonResponse({'code': 200, 'message': '认证服务者资料更新成功'})
+
+
+@csrf_exempt
+def admin_backfill_task_locations(request):
+    if request.method != 'POST':
+        return JsonResponse({'code': 405, 'message': '只支持POST'})
+    try:
+        data = json.loads(request.body)
+    except Exception:
+        return JsonResponse({'code': 400, 'message': '请求参数错误'})
+
+    admin_username = (data.get('admin_username') or '').strip()
+    admin = User.objects.filter(username=admin_username, role='admin').first()
+    if not admin:
+        return JsonResponse({'code': 403, 'message': '只有管理员可以执行地址回填'})
+
+    candidates = Task.objects.filter(
+        latitude__isnull=False,
+        longitude__isnull=False
+    ).filter(
+        Q(community_zone__isnull=True) |
+        Q(community_zone='') |
+        Q(community_zone='当前位置') |
+        Q(community_zone__startswith='约 ')
+    ).only('id', 'community_zone', 'latitude', 'longitude')
+
+    total = candidates.count()
+    updated = 0
+    skipped = 0
+
+    for task in candidates.iterator():
+        old_zone = task.community_zone
+        new_zone = resolve_community_zone(old_zone, task.latitude, task.longitude)
+        # 仍是坐标描述或无值，视为本轮未成功
+        if not new_zone or new_zone.startswith('约 '):
+            skipped += 1
+            continue
+        if new_zone != old_zone:
+            Task.objects.filter(id=task.id).update(community_zone=new_zone)
+            updated += 1
+        else:
+            skipped += 1
+
+    log_audit(
+        action='admin_backfill_task_locations',
+        actor=admin,
+        target_type='task',
+        detail=f'候选 {total}，更新 {updated}，跳过 {skipped}'
+    )
+
+    return JsonResponse({
+        'code': 200,
+        'message': '历史任务地址回填完成',
+        'stats': {
+            'total': total,
+            'updated': updated,
+            'skipped': skipped
+        }
+    })
 
 
 @csrf_exempt

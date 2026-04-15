@@ -5,11 +5,12 @@ from users.views import login, register, user_list, get_posts, create_post, upda
     all_pending_posts, review_post, get_post_history, get_audit_history, get_tasks, create_task, accept_task, \
     get_my_tasks, submit_task, abandon_task, finish_task, get_audit_tasks, admin_handle_review, get_admin_all_tasks, \
     complete_task, get_announcements, create_announcement, delete_announcement, update_user_points, update_task, \
+    update_announcement, \
     delete_task, request_terminate_task, respond_terminate_task, finish_task_with_settlement, create_task_quote, \
     get_task_quotes, choose_task_quote, create_task_review, get_provider_reviews, blacklist_user, unblacklist_user, \
     submit_blacklist_appeal, list_blacklist_appeals, handle_blacklist_appeal, get_audit_logs, admin_dashboard_stats, \
-    my_point_transactions, admin_point_transactions, export_admin_point_transactions_csv, list_verified_providers, \
-    get_provider_profile, update_provider_profile
+    my_point_transactions, admin_point_transactions, export_admin_point_transactions_csv, admin_backfill_task_locations, list_verified_providers, \
+    get_provider_profile, update_provider_profile, geocode_debug
 from users.views import get_chat_messages, send_chat_message
 
 urlpatterns = [
@@ -33,6 +34,7 @@ urlpatterns = [
     path('announcements/', get_announcements),
     path('create_announcement/', create_announcement),
     path('delete_announcement/', delete_announcement),
+    path('update_announcement/', update_announcement),
     path('chat/messages/', get_chat_messages),
     path('chat/send/', send_chat_message),
     path('applications/', application_list),    #获取申请列表
@@ -66,8 +68,10 @@ urlpatterns = [
     path('blacklist_appeal/handle/', handle_blacklist_appeal),
     path('audit_logs/', get_audit_logs),
     path('admin_dashboard_stats/', admin_dashboard_stats),
+    path('admin_backfill_task_locations/', admin_backfill_task_locations),
     path('get_audit_tasks/', get_audit_tasks),
     path('admin_handle_review/', admin_handle_review),
     path('get_admin_all_tasks/', get_admin_all_tasks),
     path('complete_task/',complete_task),
+    path('geocode_debug/', geocode_debug),
 ]

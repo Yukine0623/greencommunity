@@ -10,10 +10,34 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
+import os
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+
+def _load_local_env():
+    """
+    轻量加载 backend/.env（仅本地开发）
+    格式：KEY=VALUE，每行一个；支持 # 注释。
+    """
+    env_file = BASE_DIR / '.env'
+    if not env_file.exists():
+        return
+    for raw_line in env_file.read_text(encoding='utf-8').splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith('#') or '=' not in line:
+            continue
+        key, value = line.split('=', 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key:
+            # .env 优先，避免 shell 里残留的旧变量覆盖本地配置
+            os.environ[key] = value
+
+
+_load_local_env()
 
 
 # Quick-start development settings - unsuitable for production
@@ -128,3 +152,14 @@ CORS_ALLOW_ALL_ORIGINS = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = 'static/'
+
+# 高德 Web API Key（用于经纬度逆地理编码）
+# 可通过环境变量注入：export AMAP_WEB_API_KEY=你的key
+AMAP_WEB_API_KEY = os.getenv('AMAP_WEB_API_KEY', '')
+# 高德安全密钥（可选；配置后会自动生成 sig 签名）
+AMAP_WEB_API_SECRET = os.getenv('AMAP_WEB_API_SECRET', '')
+# 本地开发时，若系统证书链异常，允许对高德 API 回退到不校验证书（生产建议关闭）
+AMAP_ALLOW_INSECURE_SSL = os.getenv(
+    'AMAP_ALLOW_INSECURE_SSL',
+    '1' if DEBUG else '0'
+).lower() in {'1', 'true', 'yes', 'on'}

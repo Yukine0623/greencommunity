@@ -408,6 +408,7 @@ const detailRows = computed(() => {
     { label: '任务类型', value: formatCategory(currentTask.value.category) },
     { label: '发布人', value: currentTask.value.creator },
     { label: '悬赏积分', value: currentTask.value.reward_points ?? 0 },
+    { label: '任务位置', value: currentTask.value.community_zone || '未填写' },
     { label: '接单对象', value: formatAssigneeType(currentTask.value.assignee_type) },
     { label: '定向邀约', value: currentTask.value.invited_provider || '无' },
     { label: '发布时间', value: currentTask.value.created_at },
@@ -422,9 +423,11 @@ onMounted(async () => {
 
 // 计算过滤
 const filteredTasks = computed(() => {
-  const list = tasks.value.filter(t =>
-    t.title.toLowerCase().includes(searchQuery.value.toLowerCase())
-  )
+  const list = tasks.value
+    .filter((t) => !t.invited_provider)
+    .filter(t =>
+      t.title.toLowerCase().includes(searchQuery.value.toLowerCase())
+    )
 
   const sorted = [...list]
   if (sortType.value === 'reward_desc') {

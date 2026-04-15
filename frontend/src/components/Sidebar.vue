@@ -44,6 +44,9 @@
         <router-link to="/providers" class="sub-nav-item" active-class="active-sub">
           <span class="icon">🧰</span> 认证服务者
         </router-link>
+        <router-link v-if="userStore.isProvider" to="/provider-invites" class="sub-nav-item" active-class="active-sub">
+          <span class="icon">🎯</span> 定向邀约
+        </router-link>
       </div>
 
       <router-link to="/forum" class="nav-item" active-class="active">
@@ -71,12 +74,12 @@ const router = useRouter()
 const route = useRoute()
 
 const taskCenterOpen = ref(false)
-const isTaskRoute = computed(() => ['/tasks', '/mytasks', '/providers'].includes(route.path))
+const isTaskRoute = computed(() => ['/tasks', '/mytasks', '/providers', '/provider-invites'].includes(route.path))
 
 watch(
   () => route.path,
   (path) => {
-    if (path === '/tasks' || path === '/mytasks' || path === '/providers') {
+    if (path === '/tasks' || path === '/mytasks' || path === '/providers' || path === '/provider-invites') {
       taskCenterOpen.value = true
     }
   },
