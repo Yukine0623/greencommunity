@@ -3,12 +3,15 @@ from django.urls import path
 from users.views import login, register, user_list, get_posts, create_post, update_post, apply_expert, \
     get_my_application, approve_expert, reject_expert, application_list, get_user_info, my_application_history, \
     all_pending_posts, review_post, get_post_history, get_audit_history, get_tasks, create_task, accept_task, \
-    get_my_tasks, submit_task, abandon_task, finish_task, get_audit_tasks, admin_handle_review, get_admin_all_tasks
+    get_my_tasks, submit_task, abandon_task, finish_task, get_audit_tasks, admin_handle_review, get_admin_all_tasks, \
+    complete_task, get_announcements, create_announcement, delete_announcement, update_user_points
+from users.views import get_chat_messages, send_chat_message
 
 urlpatterns = [
     path('login/', login),  #登录
     path('register/', register),    #注册
     path('users/', user_list),  # 新增用户列表
+    path('update_user_points/', update_user_points),
     path('posts/', get_posts),
     path('create_post/', create_post),
     path('update_post/', update_post),
@@ -18,6 +21,11 @@ urlpatterns = [
     path('all_pending_posts/', all_pending_posts), # 对应前端的 fetchAuditPosts
     path('review_post/', review_post),           # 对应前端的审批操作
     path('post_history/', get_post_history),
+    path('announcements/', get_announcements),
+    path('create_announcement/', create_announcement),
+    path('delete_announcement/', delete_announcement),
+    path('chat/messages/', get_chat_messages),
+    path('chat/send/', send_chat_message),
     path('applications/', application_list),    #获取申请列表
     path('user_info/', get_user_info), #获取当前用户role
     path('my_application_history/', my_application_history),    #获取历史用户信息
@@ -31,4 +39,5 @@ urlpatterns = [
     path('get_audit_tasks/', get_audit_tasks),
     path('admin_handle_review/', admin_handle_review),
     path('get_admin_all_tasks/', get_admin_all_tasks),
+    path('complete_task/',complete_task),
 ]

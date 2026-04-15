@@ -115,7 +115,7 @@ const reason = ref('')
 const applicationHistory = ref([])
 
 const roleText = computed(() => {
-  if (role.value === 'user') return '普通用户'
+  if (role.value === 'resident') return '普通用户'
   if (role.value === 'expert') return '邻里达人'
   if (role.value === 'admin') return '管理员'
   return '未知身份'
@@ -128,7 +128,8 @@ const fetchUserInfo = async () => {
       username: username.value
     })
     
-    userStore.role = res.data.role 
+    userStore.role = res.data.role
+    userStore.points = res.data.points || 0
     
   } catch (error) {
     console.error("获取用户信息失败:", error)

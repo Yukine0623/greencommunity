@@ -59,7 +59,7 @@ def create_test_data():
             creator=requester,
             worker=item.get('worker'),
             result_desc=item.get('result_desc', ''),
-            reward=random.choice([10, 20, 50])
+            reward_points=random.choice([10, 20, 50])
         )
 
     print(f"✅ 成功！已创建 {len(task_scenarios)} 条不同状态的任务。")

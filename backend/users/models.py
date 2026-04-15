@@ -23,6 +23,26 @@ class Post(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True) # 记录最后一次修改时间
 
+
+class Announcement(models.Model):
+    title = models.CharField(max_length=100)
+    content = models.TextField()
+    author = models.CharField(max_length=50)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+
+class ChatMessage(models.Model):
+    task = models.ForeignKey('Task', on_delete=models.CASCADE, related_name='chat_messages', null=True, blank=True)
+    sender = models.CharField(max_length=50)
+    content = models.TextField(max_length=500)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['id']
+
 # 历史足迹：记录每一次被覆盖掉的旧版本
 class PostHistory(models.Model):
     # ForeignKey 建立一对多关系：一个帖子可以有多个历史记录
@@ -74,7 +94,7 @@ class Task(models.Model):
     content = models.TextField(max_length=1000, verbose_name="任务详情")
 
     # 2. 🚀 积分悬赏：发布时扣除/预留多少分
-    reward = models.IntegerField(default=10, verbose_name="悬赏积分")
+    reward_points = models.IntegerField(default=0, verbose_name="悬赏积分")
 
     # 3. 关联角色
     creator = models.ForeignKey(User, on_delete=models.CASCADE, related_name='created_tasks')
@@ -107,8 +127,6 @@ class Task(models.Model):
         return self.title
 
 
-from django.db import models
-
 
 class CommunityTask(models.Model):
     TASK_TYPE = (
@@ -129,6 +147,13 @@ class CommunityTask(models.Model):
 
     # 状态控制
     is_completed = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+#积分流水
+class PointTransaction(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    change = models.IntegerField()  # 正数加积分，负数减积分
+    reason = models.CharField(max_length=255)  # 比如：“发布任务-代买咖啡”、“完成任务-修理水龙头”
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

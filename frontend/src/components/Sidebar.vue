@@ -14,6 +14,7 @@
           }}
         </span>
         <p class="welcome-text">您好，<span>{{ userStore.username || '访客' }}</span></p>
+        <p class="welcome-text">🪙 <span>{{ userStore.points || 0 }}</span></p>
       </div>
     </div>
 
@@ -21,14 +22,24 @@
       <router-link to="/user" class="nav-item" active-class="active">
         <span class="icon">👤</span> 个人中心
       </router-link>
-      
-      <router-link to="/tasks" class="nav-item" active-class="active">
-        <span class="icon">🤝</span> 任务市场
-      </router-link>
 
-      <router-link to="/mytasks" class="nav-item" active-class="active">
-        <span class="icon">📋</span> 我的任务
-      </router-link>
+      <button
+        :class="['nav-item', 'nav-group-trigger', isTaskRoute ? 'active' : '']"
+        @click="toggleTaskCenter"
+      >
+        <span class="icon">🗂️</span>
+        <span class="group-title">任务中心</span>
+        <span class="chevron">{{ taskCenterOpen ? '▾' : '▸' }}</span>
+      </button>
+
+      <div v-if="taskCenterOpen" class="sub-menu">
+        <router-link to="/tasks" class="sub-nav-item" active-class="active-sub">
+          <span class="icon">🤝</span> 任务市场
+        </router-link>
+        <router-link to="/mytasks" class="sub-nav-item" active-class="active-sub">
+          <span class="icon">📋</span> 我的任务
+        </router-link>
+      </div>
 
       <router-link to="/forum" class="nav-item" active-class="active">
         <span class="icon">💬</span> 社区论坛
@@ -46,11 +57,30 @@
 </template>
 
 <script setup>
+import { computed, ref, watch } from 'vue'
 import { useUserStore } from '@/store/user'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 
 const userStore = useUserStore()
 const router = useRouter()
+const route = useRoute()
+
+const taskCenterOpen = ref(false)
+const isTaskRoute = computed(() => ['/tasks', '/mytasks'].includes(route.path))
+
+watch(
+  () => route.path,
+  (path) => {
+    if (path === '/tasks' || path === '/mytasks') {
+      taskCenterOpen.value = true
+    }
+  },
+  { immediate: true }
+)
+
+const toggleTaskCenter = () => {
+  taskCenterOpen.value = !taskCenterOpen.value
+}
 
 const handleLogout = () => {
   if (confirm('确定要退出登录吗？')) {
@@ -141,6 +171,23 @@ const handleLogout = () => {
   font-size: 15px;
 }
 
+.nav-group-trigger {
+  width: 100%;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.group-title {
+  flex: 1;
+}
+
+.chevron {
+  margin-left: auto;
+  opacity: 0.8;
+}
+
 .nav-item:hover {
   background: rgba(255, 255, 255, 0.08);
   color: #fff;
@@ -153,6 +200,35 @@ const handleLogout = () => {
   color: #63b3ed !important;
   font-weight: 600;
   border-left: 4px solid #4299e1;
+}
+
+.sub-menu {
+  margin: -2px 0 6px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sub-nav-item {
+  display: flex;
+  align-items: center;
+  padding: 10px 14px;
+  text-decoration: none;
+  color: #a0aec0;
+  border-radius: 10px;
+  font-size: 14px;
+  transition: all 0.25s ease;
+}
+
+.sub-nav-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+
+.sub-nav-item.active-sub {
+  background: rgba(66, 153, 225, 0.15);
+  color: #63b3ed;
+  font-weight: 600;
 }
 
 /* 特殊样式：返回管理后台按钮 */

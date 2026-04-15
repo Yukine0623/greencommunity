@@ -24,7 +24,10 @@
             </span>
             <span class="time-text">{{ task.created_at }}</span>
           </div>
-          <h3 class="card-title">{{ task.title }}</h3>
+          <div class="title-row">
+            <span class="points-badge">🪙 {{ task.reward_points || 0 }}</span>
+            <h3 class="card-title">{{ task.title }}</h3>
+          </div>
           <p class="card-desc">{{ task.content }}</p>
         </div>
 
@@ -71,6 +74,18 @@
               <label>详情描述</label>
               <textarea v-model="newTask.content" maxlength="1000" placeholder="请详细说明时间、地点、具体要求等..."></textarea>
             </div>
+
+            <div class="form-item">
+              <label>悬赏积分</label>
+              <input
+                v-model.number="newTask.reward_points"
+                type="number"
+                min="1"
+                step="1"
+                placeholder="请输入悬赏积分"
+              />
+              <small class="form-tip">发布后会先冻结这部分积分，任务完成后发放给接单者。</small>
+            </div>
             
             <button class="btn-submit-task" @click="submitTask">立即发布</button>
           </div>
@@ -78,29 +93,12 @@
       </div>
     </Transition>
 
-    <Transition name="fade">
-      <div v-if="showDetailModal" class="modal-overlay" @click.self="showDetailModal = false">
-        <div class="modal-content glass-card detail-modal">
-          <button class="close-x" @click="showDetailModal = false">×</button>
-          <div class="detail-header">
-            <span :class="['category-badge', currentTask.category]">{{ formatCategory(currentTask.category) }}</span>
-            <h2 class="detail-main-title">{{ currentTask.title }}</h2>
-          </div>
-          <div class="detail-body">
-            <div class="detail-info-bar">
-              <p>👤 <strong>发布人：</strong>{{ currentTask.creator }}</p>
-              <p>🕒 <strong>发布时间：</strong>{{ currentTask.created_at }}</p>
-            </div>
-            <div class="detail-content-text">
-              {{ currentTask.content }}
-            </div>
-          </div>
-          <div class="detail-footer">
-            <button class="btn-close-gray" @click="showDetailModal = false">关闭窗口</button>
-          </div>
-        </div>
-      </div>
-    </Transition>
+    <DetailModal
+      :visible="showDetailModal"
+      :title="currentTask.title || '任务详情'"
+      :rows="detailRows"
+      @close="showDetailModal = false"
+    />
   </div>
 </template>
 
@@ -108,6 +106,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useUserStore } from '@/store/user'
 import axios from 'axios'
+import DetailModal from '@/components/DetailModal.vue'
 
 const userStore = useUserStore()
 const userRole = computed(() => userStore.role)
@@ -119,7 +118,7 @@ const showModal = ref(false)
 const showDetailModal = ref(false)
 const currentTask = ref({})
 const searchQuery = ref('')
-const newTask = ref({ title: '', category: 'errand', content: '' })
+const newTask = ref({ title: '', category: 'errand', content: '', reward_points: 10 })
 
 // 接口逻辑
 const fetchTasks = async () => {
@@ -139,19 +138,22 @@ const submitTask = async () => {
 
   try {
     // 🚀 核心修复：必须把字段名改为 'username'，以匹配后端的 data.get('username')
-    await axios.post('http://127.0.0.1:8000/api/create_task/', {
+    const res = await axios.post('http://127.0.0.1:8000/api/create_task/', {
       title: newTask.value.title,
       content: newTask.value.content,
       category: newTask.value.category,
-      reward: newTask.value.reward || 10,
+      reward_points: Number(newTask.value.reward_points || 10),
       username: username.value  // 👈 重点：这里的 Key 必须叫 username
     });
 
-    alert('提交成功！任务已进入后台审核队列。');
+    if (res?.data?.points !== undefined) {
+      userStore.points = res.data.points
+    }
+    alert(res?.data?.message || '提交成功！任务已进入后台审核队列。');
     
     // 2. 关闭弹窗并重置表单
     showModal.value = false;
-    newTask.value = { title: '', category: 'errand', content: '', reward: 10 };
+    newTask.value = { title: '', category: 'errand', content: '', reward_points: 10 };
     
     // 3. 刷新列表（此时新任务在审核中，大厅列表依然不显示它是正常的）
     fetchTasks(); 
@@ -180,6 +182,16 @@ const openDetail = (task) => {
   currentTask.value = task
   showDetailModal.value = true
 }
+const detailRows = computed(() => {
+  return [
+    { label: '任务标题', value: currentTask.value.title },
+    { label: '任务类型', value: formatCategory(currentTask.value.category) },
+    { label: '发布人', value: currentTask.value.creator },
+    { label: '悬赏积分', value: currentTask.value.reward_points ?? 0 },
+    { label: '发布时间', value: currentTask.value.created_at },
+    { label: '任务描述', value: currentTask.value.content, multiline: true }
+  ]
+})
 
 onMounted(() => fetchTasks())
 
@@ -219,6 +231,10 @@ const formatCategory = (cat) => {
 }
 .market-header h1 { font-size: 28px; color: #2d3748; margin: 0; }
 .subtitle { color: #718096; margin-top: 6px; font-size: 14px; }
+.header-right {
+  display: flex;
+  align-items: center;
+}
 
 .search-bar { position: relative; }
 .search-bar input {
@@ -247,6 +263,24 @@ const formatCategory = (cat) => {
 .category-badge.other { background: #f7fafc; color: #718096; }
 
 .card-title { font-size: 19px; color: #2d3748; margin-bottom: 12px; }
+.title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.points-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: #fff7ed;
+  color: #c2410c;
+  font-size: 12px;
+  font-weight: 700;
+}
+.title-row .card-title { margin-bottom: 0; }
 .card-desc {
   color: #4a5568; font-size: 14px; line-height: 1.7; height: 72px;
   display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
@@ -262,7 +296,7 @@ const formatCategory = (cat) => {
   position: fixed; inset: 0; background: rgba(10, 25, 47, 0.6);
   backdrop-filter: blur(8px); display: flex; align-items: center; justify-content: center; z-index: 2000;
 }
-.task-modal, .detail-modal { width: 520px; padding: 40px; position: relative; }
+.task-modal { width: 520px; padding: 40px; position: relative; }
 .modal-title { text-align: center; margin-bottom: 30px; color: #2d3748; }
 
 .form-item {
@@ -275,6 +309,7 @@ const formatCategory = (cat) => {
 }
 .form-item input:focus, .form-item textarea:focus { border-color: #4299e1; background: white; }
 .form-item textarea { height: 130px; resize: none; }
+.form-tip { color: #718096; font-size: 12px; line-height: 1.5; }
 
 .btn-submit-task {
   width: 100%; padding: 15px; background: #4299e1; color: white; border: none; border-radius: 14px;
@@ -282,14 +317,6 @@ const formatCategory = (cat) => {
 }
 
 .close-x { position: absolute; right: 25px; top: 25px; font-size: 24px; border: none; background: none; color: #cbd5e0; cursor: pointer; }
-
-/* 5. 详情页微调 */
-.detail-main-title { margin: 15px 0; color: #2d3748; }
-.detail-info-bar { margin-bottom: 25px; border-bottom: 1px solid #edf2f7; padding-bottom: 15px; }
-.detail-info-bar p { margin: 8px 0; font-size: 14px; color: #718096; }
-.detail-content-text { line-height: 1.8; color: #2d3748; white-space: pre-wrap; font-size: 15px; }
-.detail-footer { margin-top: 35px; display: flex; justify-content: center; }
-.btn-close-gray { padding: 12px 50px; background: #edf2f7; border: none; border-radius: 12px; color: #4a5568; font-weight: 600; cursor: pointer; }
 
 .empty-state { text-align: center; padding: 120px; color: #cbd5e0; font-size: 16px; }
 .btn-post-first { background: #4299e1; color: white; border: none; padding: 12px 30px; border-radius: 30px; margin-top: 20px; cursor: pointer; }

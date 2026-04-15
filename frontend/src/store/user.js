@@ -69,18 +69,28 @@ import { defineStore } from 'pinia'
 export const useUserStore = defineStore('user', {
   state: () => ({
     username: '', // 登录后存入用户名
-    token: ''     // 登录后的身份令牌
+    token: '',    // 登录后的身份令牌
+    role: '',
+    points: 0
   }),
   
   actions: {
     // 登录成功时调用这个方法存数据
-    setUserInfo(name) {
-      this.username = name
+    setUserInfo(payload) {
+      if (typeof payload === 'string') {
+        this.username = payload
+        return
+      }
+      this.username = payload?.username || ''
+      this.role = payload?.role || ''
+      this.points = Number(payload?.points || 0)
     },
     // 退出登录时清空
     clearUserInfo() {
       this.username = ''
       this.token = ''
+      this.role = ''
+      this.points = 0
     }
   }
 })

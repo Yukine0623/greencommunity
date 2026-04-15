@@ -120,8 +120,11 @@ const handleLogin = async () => {
     message.value = res.data.message
 
     if (res.data.code === 200) {
-      // 确保这里的函数名与 store/user.js 中定义的一致
-      userStore.setUserInfo(username.value) 
+      userStore.setUserInfo({
+        username: username.value,
+        role: res.data.role,
+        points: res.data.points || 0
+      })
       
       // 根据角色跳转
       if (res.data.role === 'admin') {

@@ -31,12 +31,29 @@
         <span class="icon">📝</span> 邻里达人审核
       </div>
 
-      <div 
-        class="nav-item" 
-        :class="{ active: currentActive === 'posts' }"
-        @click="handleSwitch('posts')"
+      <div
+        class="nav-item nav-group"
+        :class="{ active: isContentManageActive }"
+        @click="toggleContentManage"
       >
-        <span class="icon">📜</span> 社区帖子审核
+        <span class="icon">📜</span> 社区内容管理
+        <span class="chevron">{{ contentManageOpen ? '▾' : '▸' }}</span>
+      </div>
+      <div v-if="contentManageOpen" class="sub-menu">
+        <div
+          class="sub-nav-item"
+          :class="{ active: currentActive === 'announcementManage' }"
+          @click="handleSwitch('announcementManage')"
+        >
+          社区公告管理
+        </div>
+        <div
+          class="sub-nav-item"
+          :class="{ active: currentActive === 'postManage' }"
+          @click="handleSwitch('postManage')"
+        >
+          社区帖子管理
+        </div>
       </div>
 
       <div 
@@ -57,7 +74,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 const props = defineProps({
@@ -69,6 +86,8 @@ const router = useRouter()
 
 // 🚀 核心：统一使用 currentActive 记录当前激活的菜单项
 const currentActive = ref('users')
+const contentManageOpen = ref(false)
+const isContentManageActive = computed(() => ['announcementManage', 'postManage'].includes(currentActive.value))
 
 
 const logout = () => {
@@ -79,7 +98,14 @@ const logout = () => {
 const handleSwitch = (view) => {
   console.log('侧边栏点击了，发送的值是:', view) // 🚀 加这一行
   currentActive.value = view
+  if (view === 'announcementManage' || view === 'postManage') {
+    contentManageOpen.value = true
+  }
   emit('switchView', view)
+}
+
+const toggleContentManage = () => {
+  contentManageOpen.value = !contentManageOpen.value
 }
 </script>
 
@@ -173,6 +199,39 @@ const handleSwitch = (view) => {
   transition: all 0.25s ease;
   font-size: 15px;
   border-left: 4px solid transparent; /* 预留边框位，防止抖动 */
+}
+
+.nav-group .chevron {
+  margin-left: auto;
+  opacity: 0.85;
+}
+
+.sub-menu {
+  margin-top: -3px;
+  margin-left: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sub-nav-item {
+  padding: 10px 14px;
+  border-radius: 10px;
+  color: #a7f3d0;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.2s ease;
+}
+
+.sub-nav-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+
+.sub-nav-item.active {
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+  font-weight: 600;
 }
 
 .nav-item:hover {

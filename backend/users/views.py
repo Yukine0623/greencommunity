@@ -1,11 +1,15 @@
 from django.db.models import Q
 from django.views.decorators.csrf import csrf_exempt
 from django.http import JsonResponse
-from .models import User, Post, ExpertApplication, PostHistory,Task
+from .models import User, Post, ExpertApplication, PostHistory, Task, PointTransaction, Announcement, ChatMessage
 from django.utils.timezone import now
 from math import radians, cos, sin, asin, sqrt
 from .models import CommunityTask
-
+from django.db import transaction
+from django.db.models import F
+from django.http import JsonResponse
+from django.views.decorators.http import require_POST
+#from .models import Task, PointTransaction, User
 import json
 
 
@@ -32,7 +36,8 @@ def login(request):
         return JsonResponse({
             'code': 200,
             'message': '登录成功',
-            'role': user.role   # 👈 就是这里！！
+            'role': user.role,   # 返回用户身份
+            'points': user.points # 返回当前用户积分
         })
 
     except User.DoesNotExist:
@@ -77,6 +82,7 @@ def user_list(request):
                 'username': user.username,
                 'role': user.role,
                 'phone': user.phone,
+                'points': user.points,
                 'created_at': user.created_at.strftime('%Y-%m-%d %H:%M:%S')
             }
             for user in users
@@ -134,6 +140,184 @@ def get_posts(request):
             'created_at': p.created_at.strftime('%Y-%m-%d %H:%M')
         })
     return JsonResponse({'posts': res_list})
+
+
+@csrf_exempt
+def get_announcements(request):
+    if request.method != 'GET':
+        return JsonResponse({'code': 405, 'message': '只支持GET'})
+
+    announcements = Announcement.objects.all()
+    data = []
+    for item in announcements:
+        data.append({
+            'id': item.id,
+            'title': item.title,
+            'content': item.content,
+            'author': item.author,
+            'created_at': item.created_at.strftime('%Y-%m-%d %H:%M')
+        })
+
+    return JsonResponse({'code': 200, 'announcements': data})
+
+
+@csrf_exempt
+def create_announcement(request):
+    if request.method != 'POST':
+        return JsonResponse({'code': 405, 'message': '只支持POST'})
+
+    try:
+        data = json.loads(request.body)
+        username = data.get('username')
+        title = data.get('title')
+        content = data.get('content')
+    except Exception:
+        return JsonResponse({'code': 400, 'message': '请求数据格式错误'})
+
+    if not username or not title or not content:
+        return JsonResponse({'code': 400, 'message': '参数不完整'})
+
+    user = User.objects.filter(username=username).first()
+    if not user:
+        return JsonResponse({'code': 404, 'message': '用户不存在'})
+
+    if user.role != 'admin':
+        return JsonResponse({'code': 403, 'message': '只有管理员可以发布公告'})
+
+    Announcement.objects.create(
+        title=title.strip(),
+        content=content.strip(),
+        author=username
+    )
+    return JsonResponse({'code': 200, 'message': '公告发布成功'})
+
+
+@csrf_exempt
+def delete_announcement(request):
+    if request.method != 'POST':
+        return JsonResponse({'code': 405, 'message': '只支持POST'})
+
+    try:
+        data = json.loads(request.body)
+        username = (data.get('username') or '').strip()
+        announcement_id = data.get('id')
+    except Exception:
+        return JsonResponse({'code': 400, 'message': '请求数据格式错误'})
+
+    if not username or not announcement_id:
+        return JsonResponse({'code': 400, 'message': '参数不完整'})
+
+    user = User.objects.filter(username=username).first()
+    if not user or user.role != 'admin':
+        return JsonResponse({'code': 403, 'message': '只有管理员可以删除公告'})
+
+    announcement = Announcement.objects.filter(id=announcement_id).first()
+    if not announcement:
+        return JsonResponse({'code': 404, 'message': '公告不存在'})
+
+    announcement.delete()
+    return JsonResponse({'code': 200, 'message': '公告已删除'})
+
+
+@csrf_exempt
+def get_chat_messages(request):
+    if request.method != 'GET':
+        return JsonResponse({'code': 405, 'message': '只支持GET'})
+
+    username = (request.GET.get('username') or '').strip()
+    task_id = request.GET.get('task_id')
+    if not username or not task_id:
+        return JsonResponse({'code': 400, 'message': '缺少必要参数'})
+
+    try:
+        task = Task.objects.get(id=task_id)
+    except Task.DoesNotExist:
+        return JsonResponse({'code': 404, 'message': '任务不存在'})
+
+    is_creator = task.creator.username == username
+    is_worker = task.worker and task.worker.username == username
+    if not (is_creator or is_worker):
+        return JsonResponse({'code': 403, 'message': '你没有查看该任务聊天的权限'})
+
+    try:
+        after_id = int(request.GET.get('after_id', 0))
+    except ValueError:
+        after_id = 0
+
+    try:
+        limit = int(request.GET.get('limit', 50))
+    except ValueError:
+        limit = 50
+
+    limit = max(1, min(limit, 200))
+
+    queryset = ChatMessage.objects.filter(task=task, id__gt=after_id).order_by('id')[:limit]
+    data = []
+    for msg in queryset:
+        data.append({
+            'id': msg.id,
+            'sender': msg.sender,
+            'content': msg.content,
+            'created_at': msg.created_at.strftime('%Y-%m-%d %H:%M:%S')
+        })
+
+    return JsonResponse({'code': 200, 'messages': data})
+
+
+@csrf_exempt
+def send_chat_message(request):
+    if request.method != 'POST':
+        return JsonResponse({'code': 405, 'message': '只支持POST'})
+
+    try:
+        data = json.loads(request.body)
+        username = (data.get('username') or '').strip()
+        task_id = data.get('task_id')
+        content = (data.get('content') or '').strip()
+    except Exception:
+        return JsonResponse({'code': 400, 'message': '请求数据格式错误'})
+
+    if not username:
+        return JsonResponse({'code': 400, 'message': '缺少用户名'})
+    if not task_id:
+        return JsonResponse({'code': 400, 'message': '缺少任务ID'})
+    if not content:
+        return JsonResponse({'code': 400, 'message': '消息不能为空'})
+    if len(content) > 500:
+        return JsonResponse({'code': 400, 'message': '消息长度不能超过500字'})
+
+    if not User.objects.filter(username=username).exists():
+        return JsonResponse({'code': 404, 'message': '用户不存在'})
+
+    try:
+        task = Task.objects.get(id=task_id)
+    except Task.DoesNotExist:
+        return JsonResponse({'code': 404, 'message': '任务不存在'})
+
+    is_creator = task.creator.username == username
+    is_worker = task.worker and task.worker.username == username
+    if not (is_creator or is_worker):
+        return JsonResponse({'code': 403, 'message': '你没有发送该任务聊天消息的权限'})
+
+    if not task.worker:
+        return JsonResponse({'code': 400, 'message': '任务尚未接单，暂不能聊天'})
+
+    msg = ChatMessage.objects.create(
+        task=task,
+        sender=username,
+        content=content
+    )
+
+    return JsonResponse({
+        'code': 200,
+        'message': '发送成功',
+        'data': {
+            'id': msg.id,
+            'sender': msg.sender,
+            'content': msg.content,
+            'created_at': msg.created_at.strftime('%Y-%m-%d %H:%M:%S')
+        }
+    })
 
 # 获取指定帖子的历史修改记录
 def get_post_history(request):
@@ -485,7 +669,8 @@ def get_user_info(request):
         return JsonResponse({
             'code': 200,
             'username': user.username,
-            'role': user.role
+            'role': user.role,
+            'points': user.points
         })
 
     except Exception as e:
@@ -533,6 +718,7 @@ def get_tasks(request):
             'title': t.title,
             'category': t.category,
             'content': t.content,
+            'reward_points': t.reward_points,
             'creator': t.creator.username,
             'created_at': t.created_at.strftime('%Y-%m-%d %H:%M')
         })
@@ -561,19 +747,37 @@ def create_task(request):
             except User.DoesNotExist:
                 return JsonResponse({'code': 404, 'message': '发布人账号异常'})
 
-            # 3. 🚀 修复跳过审核的关键：在这里强制设为 'auditing'
-            new_task = Task.objects.create(
-                title=data.get('title'),
-                content=data.get('content'),
-                category=data.get('category'),
-                reward=int(data.get('reward', 10)),  # 确保是数字
-                creator=user,  # 直接关联用户对象
-                status='auditing'  # 🔒 锁死状态！哪怕前端传 pending，这里也存 auditing
-            )
+            reward_points = int(data.get('reward_points', data.get('reward', 10)))
+            if reward_points <= 0:
+                return JsonResponse({'code': 400, 'message': '积分必须大于 0'})
+
+            if user.points < reward_points:
+                return JsonResponse({'code': 400, 'message': '积分不足，无法发布该任务'})
+
+            with transaction.atomic():
+                user.points = F('points') - reward_points
+                user.save(update_fields=['points'])
+                user.refresh_from_db(fields=['points'])
+
+                Task.objects.create(
+                    title=data.get('title'),
+                    content=data.get('content'),
+                    category=data.get('category'),
+                    reward_points=reward_points,
+                    creator=user,
+                    status='auditing'
+                )
+
+                PointTransaction.objects.create(
+                    user=user,
+                    change=-reward_points,
+                    reason='发布任务冻结积分'
+                )
 
             return JsonResponse({
                 'code': 200,
-                'message': '提交成功！任务已进入待审核队列，通过后将发布到市场。'
+                'message': '提交成功！任务已进入待审核队列，通过后将发布到市场。',
+                'points': user.points
             })
 
         except Exception as e:
@@ -590,6 +794,9 @@ def accept_task(request):
         data = json.loads(request.body)
         task = Task.objects.get(id=data.get('task_id'))
         worker_user = User.objects.get(username=data.get('username'))
+
+        if task.status != 'pending':
+            return JsonResponse({'code': 400, 'message': '当前任务不可接单'})
 
         # 更新任务状态和接单人
         task.worker = worker_user
@@ -619,6 +826,9 @@ def get_my_tasks(request):
             'creator': t.creator.username,
             'content': t.content,
             'category': t.category,
+            'reward_points': t.reward_points,
+            'result_desc': t.result_desc,
+            'abandon_reason': t.abandon_reason,
             'created_at': t.created_at.strftime('%Y-%m-%d %H:%M')
         } for t in queryset]
 
@@ -670,12 +880,40 @@ def finish_task(request):
     """发布人确认任务已圆满完成"""
     if request.method == 'POST':
         data = json.loads(request.body)
+        username = data.get('username')
         try:
-            task = Task.objects.get(id=data.get('task_id'))
-            # 🚀 将状态改为：已完成
-            task.status = 'finished'
-            task.save()
-            return JsonResponse({'code': 200, 'message': '任务已完结，感谢您的互助！'})
+            with transaction.atomic():
+                task = Task.objects.select_for_update().get(id=data.get('task_id'))
+
+                if task.status != 'submitted':
+                    return JsonResponse({'code': 400, 'message': '当前状态不可确认结项'})
+
+                if not task.worker:
+                    return JsonResponse({'code': 400, 'message': '任务尚未分配接单人'})
+
+                if username and task.creator.username != username:
+                    return JsonResponse({'code': 403, 'message': '只有发布人可以确认结项'})
+
+                worker = task.worker
+                worker.points = F('points') + task.reward_points
+                worker.save(update_fields=['points'])
+
+                PointTransaction.objects.create(
+                    user=worker,
+                    change=task.reward_points,
+                    reason=f'完成任务获得积分：{task.title}'
+                )
+
+                task.status = 'finished'
+                task.save(update_fields=['status', 'updated_at'])
+
+                worker.refresh_from_db(fields=['points'])
+
+            return JsonResponse({
+                'code': 200,
+                'message': f'任务已完结，已向接单者发放 {task.reward_points} 积分',
+                'worker_points': worker.points
+            })
         except Task.DoesNotExist:
             return JsonResponse({'code': 404, 'message': '任务不存在'})
 
@@ -703,9 +941,44 @@ def get_audit_tasks(request):
             'creator': t.creator.username,
             'worker': t.worker.username if t.worker else "暂无",
             'result_desc': t.result_desc,  # 达人提交的成果描述
+            'reward_points': t.reward_points,
             'created_at': t.created_at.strftime('%Y-%m-%d %H:%M')
         })
     return JsonResponse({'code': 200, 'tasks': data})
+
+
+@csrf_exempt
+def update_user_points(request):
+    if request.method != 'POST':
+        return JsonResponse({'code': 405, 'message': '只支持POST'})
+
+    try:
+        data = json.loads(request.body)
+        admin_username = data.get('admin_username')
+        user_id = data.get('user_id')
+        points = int(data.get('points'))
+    except Exception:
+        return JsonResponse({'code': 400, 'message': '请求参数错误'})
+
+    admin = User.objects.filter(username=admin_username).first()
+    if not admin or admin.role != 'admin':
+        return JsonResponse({'code': 403, 'message': '只有管理员可以修改积分'})
+
+    user = User.objects.filter(id=user_id).first()
+    if not user:
+        return JsonResponse({'code': 404, 'message': '目标用户不存在'})
+
+    old_points = user.points
+    user.points = points
+    user.save(update_fields=['points'])
+
+    PointTransaction.objects.create(
+        user=user,
+        change=points - old_points,
+        reason=f'管理员调整积分：{admin_username}'
+    )
+
+    return JsonResponse({'code': 200, 'message': '积分修改成功', 'points': user.points})
 
 
 @csrf_exempt
@@ -807,6 +1080,56 @@ def get_nearby_tasks(user_lat, user_lng, radius=3):
             nearby_tasks.append(task)
     return nearby_tasks
 
+
+@require_POST
+@transaction.atomic
+def complete_task(request):
+    """
+    确认完成任务：将积分从系统/冻结状态转入接单人账户
+    """
+    try:
+        data = json.loads(request.body)
+        task_id = data.get('task_id')
+
+        # 1. 获取任务，并锁定该行数据防止并发冲突
+        # select_for_update() 确保在事务结束前，其他人不能修改这个任务
+        task = Task.objects.select_for_update().get(id=task_id)
+
+        if task.status == 'finished':
+            return JsonResponse({'status': 'error', 'message': '任务已完成，请勿重复操作'}, status=400)
+
+        if task.status != 'submitted':
+            return JsonResponse({'status': 'error', 'message': '当前任务状态不可确认完成'}, status=400)
+
+        if not task.worker:
+            return JsonResponse({'status': 'error', 'message': '该任务尚未有人接单，无法完成'}, status=400)
+
+        # 2. 给接单者增加积分
+        worker = task.worker
+        worker.points = F('points') + task.reward_points
+        worker.save(update_fields=['points'])
+
+        # 3. 记录积分流水
+        PointTransaction.objects.create(
+            user=worker,
+            change=task.reward_points,
+            reason=f"完成互助任务: {task.title}"
+        )
+
+        # 4. 修改任务状态
+        task.status = 'finished'
+        task.save(update_fields=['status', 'updated_at'])
+
+        return JsonResponse({
+            'status': 'success',
+            'message': f'任务已确认完成，{task.reward_points} 积分已发放至接单人账户'
+        })
+
+    except Task.DoesNotExist:
+        return JsonResponse({'status': 'error', 'message': '找不到该任务'}, status=404)
+    except Exception as e:
+        # transaction.atomic 会在这里捕获异常并自动回滚所有数据库操作
+        return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
 
 print("views loaded")
 

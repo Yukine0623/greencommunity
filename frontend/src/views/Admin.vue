@@ -29,13 +29,7 @@
             <option value="admin">管理员</option>
           </select>
 
-          <select v-if="currentView === 'taskAudit'" v-model="taskTypeFilter" class="custom-select">
-            <option value="all">全业务类型</option>
-            <option value="initial">新建任务初审</option>
-            <option value="dispute">争议仲裁复审</option>
-          </select>
-
-          <select v-if="['taskAudit', 'posts'].includes(currentView)" v-model="processStatusFilter" class="custom-select">
+          <select v-if="currentView === 'postManage'" v-model="processStatusFilter" class="custom-select">
             <option value="all">🌐 全部状态</option>
             <option value="todo">⏳ 待处理</option>
             <option value="done">✅ 已归档</option>
@@ -49,7 +43,7 @@
           <div class="table-wrapper">
             <table class="custom-table">
               <thead>
-                <tr><th>用户标识</th><th>账户名</th><th>职能角色</th><th>积分</th><th>注册日期</th></tr>
+                <tr><th>用户标识</th><th>账户名</th><th>职能角色</th><th>积分</th><th>注册日期</th><th class="center">操作</th></tr>
               </thead>
               <tbody>
                 <tr v-for="user in paginatedUsers" :key="user.id">
@@ -58,6 +52,9 @@
                   <td><span :class="['role-badge', user.role]">{{ formatRole(user.role) }}</span></td>
                   <td><span class="points-text">🪙 {{ user.points || 0 }}</span></td>
                   <td class="time-col">{{ user.created_at }}</td>
+                  <td class="center">
+                    <button class="btn-ghost" @click="openPointsPrompt(user)">修改积分</button>
+                  </td>
                 </tr>
               </tbody>
             </table>
@@ -94,8 +91,50 @@
           </div>
         </div>
 
-        <div class="glass-card table-card" v-else-if="currentView === 'posts'" key="posts">
-          <div class="card-header"><h3>内容审核日志</h3></div>
+        <div class="glass-card table-card" v-else-if="currentView === 'announcementManage'" key="announcement-manage">
+          <div class="card-header"><h3>社区公告管理</h3></div>
+          <div class="announcement-admin-panel">
+            <div class="announcement-form">
+              <input
+                v-model="announcementForm.title"
+                class="announcement-input"
+                placeholder="公告标题"
+                maxlength="100"
+              />
+              <textarea
+                v-model="announcementForm.content"
+                class="announcement-textarea"
+                placeholder="公告内容"
+                maxlength="1000"
+              />
+              <div class="announcement-form-footer">
+                <button class="btn-primary" @click="publishAnnouncement">发布公告</button>
+              </div>
+            </div>
+
+            <div class="announcement-list">
+              <div
+                v-for="item in filteredAnnouncements"
+                :key="item.id"
+                class="announcement-item"
+              >
+                <div class="announcement-item-header">
+                  <strong>{{ item.title }}</strong>
+                  <span class="announcement-time">{{ item.created_at }}</span>
+                </div>
+                <p class="announcement-content">{{ item.content }}</p>
+                <div class="announcement-item-footer">
+                  <span class="announcement-author">发布人：{{ item.author }}</span>
+                  <button class="btn-danger" @click="deleteAnnouncement(item.id)">删除</button>
+                </div>
+              </div>
+              <div v-if="filteredAnnouncements.length === 0" class="announcement-empty">暂无公告</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="glass-card table-card" v-else-if="currentView === 'postManage'" key="post-manage">
+          <div class="card-header"><h3>社区帖子管理</h3></div>
           <div class="table-wrapper">
             <table class="custom-table">
               <thead>
@@ -127,58 +166,87 @@
 
         <div class="glass-card table-card" v-else-if="currentView === 'taskAudit'" key="tasks">
           <div class="card-header"><h3>互助任务管控中心</h3></div>
-          <div class="table-wrapper">
-            <table class="custom-table">
-              <thead>
-                <tr><th>任务信息</th><th>发布方</th><th>业务类型</th><th>流程环节</th><th class="center">管理操作</th></tr>
-              </thead>
-              <tbody>
-                <tr v-for="task in mixedFilteredTasks" :key="task.id">
-                  <td class="title-col">
-                    <strong>{{ task.title }}</strong>
-                    <span class="category-tag">{{ formatCategory(task.category) }}</span>
-                  </td>
-                  <td>{{ task.creator }}</td>
-                  <td>{{ task.status === 'auditing' || task.status === 'pending' || task.status === 'rejected' ? '初核申请' : '争议仲裁' }}</td>
-                  <td><span :class="['status-pill', task.status]">{{ translateStatus(task.status) }}</span></td>
-                  <td class="action-cols center">
-                    <button v-if="['auditing', 'intervention'].includes(task.status)" class="btn-primary" @click="openAuditModal(task)">
-                      立即介入
-                    </button>
-                    <button v-else class="btn-ghost" @click="openAuditModal(task)">查看详情</button>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+          <div class="task-audit-block">
+            <h4 class="task-audit-title">任务初审区</h4>
+            <div class="table-wrapper">
+              <table class="custom-table">
+                <thead>
+                  <tr><th>任务信息</th><th>发布方</th><th>悬赏积分</th><th>状态</th><th class="center">管理操作</th></tr>
+                </thead>
+                <tbody>
+                  <tr v-for="task in initialAuditTasks" :key="`initial-${task.id}`">
+                    <td class="title-col">
+                      <strong>{{ task.title }}</strong>
+                      <span class="category-tag">{{ formatCategory(task.category) }}</span>
+                    </td>
+                    <td>{{ task.creator }}</td>
+                    <td>🪙 {{ task.reward_points || 0 }}</td>
+                    <td><span :class="['status-pill', task.status]">{{ translateStatus(task.status) }}</span></td>
+                    <td class="action-cols center">
+                      <div class="action-btns">
+                        <button class="btn-ghost" @click="openTaskDetailModal(task)">详情</button>
+                        <button class="btn-primary" @click="openAuditModal(task)">立即介入</button>
+                      </div>
+                    </td>
+                  </tr>
+                  <tr v-if="initialAuditTasks.length === 0">
+                    <td colspan="5" class="empty-row">暂无待初审任务</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="task-audit-block">
+            <h4 class="task-audit-title">任务复审区</h4>
+            <div class="table-wrapper">
+              <table class="custom-table">
+                <thead>
+                  <tr><th>任务信息</th><th>发布方</th><th>接单方</th><th>状态</th><th class="center">管理操作</th></tr>
+                </thead>
+                <tbody>
+                  <tr v-for="task in recheckAuditTasks" :key="`recheck-${task.id}`">
+                    <td class="title-col">
+                      <strong>{{ task.title }}</strong>
+                      <span class="category-tag">{{ formatCategory(task.category) }}</span>
+                    </td>
+                    <td>{{ task.creator }}</td>
+                    <td>{{ task.worker || '暂无' }}</td>
+                    <td><span :class="['status-pill', task.status]">{{ translateStatus(task.status) }}</span></td>
+                    <td class="action-cols center">
+                      <div class="action-btns">
+                        <button class="btn-ghost" @click="openTaskDetailModal(task)">详情</button>
+                        <button class="btn-primary" @click="openAuditModal(task)">立即介入</button>
+                      </div>
+                    </td>
+                  </tr>
+                  <tr v-if="recheckAuditTasks.length === 0">
+                    <td colspan="5" class="empty-row">暂无待复审任务</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       </Transition>
     </div>
 
     <Teleport to="body">
-      
-      <Transition name="zoom">
-        <div v-if="showDetailModal" class="modal-overlay" @click.self="closeDetailModal">
-          <div class="modal-card detail-view-card">
-            <div class="modal-header">
-              <div class="title-row">
-                <span class="type-badge">内容详情</span>
-                <h2 class="detail-title">{{ currentPostDetail.title }}</h2>
-              </div>
-              <div class="detail-meta">
-                <span class="meta-item">👤 作者：<strong>{{ currentPostDetail.author }}</strong></span>
-                <span class="meta-item">🕒 发布时间：{{ currentPostDetail.processed_at || currentPostDetail.created_at }}</span>
-              </div>
-            </div>
-            <div class="modal-body">
-              <div class="post-content-text">{{ currentPostDetail.content }}</div>
-            </div>
-            <div class="modal-footer">
-              <button class="btn-close-styled" @click="closeDetailModal">已阅并关闭</button>
-            </div>
-          </div>
-        </div>
-      </Transition>
+      <DetailModal
+        :visible="showDetailModal"
+        :title="currentPostDetail.title || '内容详情'"
+        :rows="postDetailRows"
+        close-text="已阅并关闭"
+        width="620px"
+        @close="closeDetailModal"
+      />
+      <DetailModal
+        :visible="showTaskDetailModal"
+        :title="currentTaskDetail.title || '任务详情'"
+        :rows="taskDetailRows"
+        width="660px"
+        @close="closeTaskDetailModal"
+      />
 
       <Transition name="zoom">
         <div v-if="showRejectModal" class="modal-overlay" @click.self="closeModal">
@@ -226,6 +294,7 @@ import AdminSidebar from '../components/AdminSidebar.vue'
 import { ref, onMounted, computed, watch } from 'vue'
 import { useUserStore } from '@/store/user'
 import axios from 'axios'
+import DetailModal from '@/components/DetailModal.vue'
 
 const userStore = useUserStore()
 
@@ -242,29 +311,42 @@ const applications = ref([])
 const auditPosts = ref([])
 const auditHistory = ref([])
 const auditTasks = ref([])
+const adminAnnouncements = ref([])
+const announcementForm = ref({
+  title: '',
+  content: ''
+})
 
-const taskTypeFilter = ref('all') 
 const processStatusFilter = ref('all') 
 
 const showRejectModal = ref(false)
 const showDetailModal = ref(false)
+const showTaskDetailModal = ref(false)
 const showAuditModal = ref(false)
 const rejectType = ref('')
 const rejectReason = ref('')
 const currentUser = ref('')
 const currentPostDetail = ref({})
+const currentTaskDetail = ref({})
 const selectedTask = ref({})
 const auditReason = ref('')
 
 // --- 计算属性 ---
 const viewTitle = computed(() => {
-  const titles = { users: '用户管理系统', apply: '邻里达人入驻审核', posts: '社区内容安全管理', taskAudit: '任务调度与仲裁中心' }
+  const titles = {
+    users: '用户管理系统',
+    apply: '邻里达人入驻审核',
+    announcementManage: '社区内容管理 / 公告',
+    postManage: '社区内容管理 / 帖子',
+    taskAudit: '任务调度与仲裁中心'
+  }
   return titles[currentView.value]
 })
 
 const searchPlaceholder = computed(() => {
   if (currentView.value === 'users') return '搜索用户名...'
-  if (currentView.value === 'posts') return '搜标题、内容或作者...'
+  if (currentView.value === 'announcementManage') return '搜公告标题或发布人...'
+  if (currentView.value === 'postManage') return '搜标题、内容或作者...'
   return '搜索关键词或发起人...'
 })
 
@@ -283,24 +365,19 @@ const mixedFilteredPosts = computed(() => {
   })
 })
 
-// 🚀 2. 任务混合过滤逻辑
-const mixedFilteredTasks = computed(() => {
-  return auditTasks.value.filter(t => {
-    const matchSearch = t.title.includes(searchName.value) || t.creator.includes(searchName.value);
-    
-    let matchType = true;
-    const isInitial = ['auditing', 'pending', 'rejected'].includes(t.status);
-    const isDispute = ['intervention', 'finished'].includes(t.status);
-    if (taskTypeFilter.value === 'initial') matchType = isInitial;
-    if (taskTypeFilter.value === 'dispute') matchType = isDispute;
+const searchedAuditTasks = computed(() => {
+  return auditTasks.value.filter((task) => {
+    return task.title.includes(searchName.value) || task.creator.includes(searchName.value)
+  })
+})
 
-    let matchStatus = true; 
-    if (processStatusFilter.value === 'todo') matchStatus = ['auditing', 'intervention'].includes(t.status);
-    else if (processStatusFilter.value === 'done') matchStatus = ['pending', 'rejected', 'finished'].includes(t.status);
+const initialAuditTasks = computed(() => {
+  return searchedAuditTasks.value.filter((task) => task.status === 'auditing')
+})
 
-    return matchSearch && matchType && matchStatus;
-  }).sort((a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at)); 
-});
+const recheckAuditTasks = computed(() => {
+  return searchedAuditTasks.value.filter((task) => task.status === 'intervention')
+})
 
 const filteredUsers = computed(() => users.value.filter(u => 
   u.username.toLowerCase().includes(searchName.value.toLowerCase()) && 
@@ -318,12 +395,59 @@ const filteredApplications = computed(() => {
   if (!applications.value) return [];
   return applications.value.filter(item => item.username.toLowerCase().includes(searchName.value.toLowerCase()));
 });
+const filteredAnnouncements = computed(() => {
+  return adminAnnouncements.value.filter((item) => {
+    return item.title.includes(searchName.value) || item.author.includes(searchName.value)
+  })
+})
+const postDetailRows = computed(() => {
+  return [
+    { label: '作者', value: currentPostDetail.value.author },
+    {
+      label: '状态',
+      value: currentPostDetail.value.status ? translateStatus(currentPostDetail.value.status) : '--',
+      badge: true,
+      badgeType: currentPostDetail.value.status || 'default'
+    },
+    { label: '发布时间', value: currentPostDetail.value.processed_at || currentPostDetail.value.created_at },
+    {
+      label: '反馈理由',
+      value: currentPostDetail.value.reject_reason || '--',
+      visible: currentPostDetail.value.status === 'rejected' || !!currentPostDetail.value.reject_reason
+    },
+    { label: '内容详情', value: currentPostDetail.value.content, multiline: true }
+  ]
+})
+const taskDetailRows = computed(() => {
+  return [
+    { label: '任务标题', value: currentTaskDetail.value.title },
+    { label: '任务分类', value: formatCategory(currentTaskDetail.value.category) },
+    { label: '发布方', value: currentTaskDetail.value.creator },
+    { label: '接单方', value: currentTaskDetail.value.worker || '暂无' },
+    { label: '悬赏积分', value: currentTaskDetail.value.reward_points || 0 },
+    {
+      label: '任务状态',
+      value: currentTaskDetail.value.status ? translateStatus(currentTaskDetail.value.status) : '--',
+      badge: true,
+      badgeType: currentTaskDetail.value.status || 'default'
+    },
+    { label: '发布时间', value: currentTaskDetail.value.created_at },
+    { label: '任务描述', value: currentTaskDetail.value.content, multiline: true },
+    {
+      label: '达人反馈',
+      value: currentTaskDetail.value.result_desc,
+      multiline: true,
+      visible: !!currentTaskDetail.value.result_desc
+    }
+  ]
+})
 
 // --- API 方法 ---
 const refreshData = () => {
   if (currentView.value === 'users') fetchUsers()
   if (currentView.value === 'apply') fetchApplications()
-  if (currentView.value === 'posts') { fetchAuditPosts(); fetchAuditHistory() }
+  if (currentView.value === 'announcementManage') fetchAnnouncements()
+  if (currentView.value === 'postManage') { fetchAuditPosts(); fetchAuditHistory() }
   if (currentView.value === 'taskAudit') fetchAuditTasks()
 }
 
@@ -332,6 +456,10 @@ const fetchApplications = async () => { const res = await axios.get('http://127.
 const fetchAuditPosts = async () => { const res = await axios.get('http://127.0.0.1:8000/api/all_pending_posts/'); auditPosts.value = res.data.posts }
 const fetchAuditHistory = async () => { const res = await axios.get('http://127.0.0.1:8000/api/audit_history/'); auditHistory.value = res.data.history }
 const fetchAuditTasks = async () => { const res = await axios.get('http://127.0.0.1:8000/api/get_audit_tasks/'); auditTasks.value = res.data.tasks }
+const fetchAnnouncements = async () => {
+  const res = await axios.get('http://127.0.0.1:8000/api/announcements/')
+  adminAnnouncements.value = res.data.announcements || []
+}
 
 const switchView = (view) => {
   currentView.value = view
@@ -343,6 +471,61 @@ const switchView = (view) => {
 // --- 审批逻辑 ---
 const approvePost = async (id) => { await axios.post('http://127.0.0.1:8000/api/review_post/', { id, action: 'approve' }); refreshData() }
 const approve = async (username) => { await axios.post('http://127.0.0.1:8000/api/approve/', { username }); refreshData() }
+const publishAnnouncement = async () => {
+  if (!announcementForm.value.title.trim() || !announcementForm.value.content.trim()) {
+    alert('请填写公告标题和内容')
+    return
+  }
+  const res = await axios.post('http://127.0.0.1:8000/api/create_announcement/', {
+    username: adminName.value,
+    title: announcementForm.value.title,
+    content: announcementForm.value.content
+  })
+  if (res.data.code !== 200) {
+    alert(res.data.message || '公告发布失败')
+    return
+  }
+  announcementForm.value.title = ''
+  announcementForm.value.content = ''
+  fetchAnnouncements()
+}
+const deleteAnnouncement = async (id) => {
+  if (!confirm('确认删除这条公告吗？')) return
+  const res = await axios.post('http://127.0.0.1:8000/api/delete_announcement/', {
+    username: adminName.value,
+    id
+  })
+  if (res.data.code !== 200) {
+    alert(res.data.message || '删除失败')
+    return
+  }
+  fetchAnnouncements()
+}
+const openPointsPrompt = async (user) => {
+  const input = prompt(`请输入 ${user.username} 的新积分（当前 ${user.points || 0}）`, user.points || 0)
+  if (input === null) return
+  const points = Number(input)
+  if (!Number.isInteger(points) || points < 0) {
+    alert('请输入大于等于 0 的整数')
+    return
+  }
+
+  try {
+    const res = await axios.post('http://127.0.0.1:8000/api/update_user_points/', {
+      admin_username: adminName.value,
+      user_id: user.id,
+      points
+    })
+    if (res.data.code === 200) {
+      fetchUsers()
+      alert('积分修改成功')
+    } else {
+      alert(res.data.message || '积分修改失败')
+    }
+  } catch (error) {
+    alert(error.response?.data?.message || '积分修改失败')
+  }
+}
 
 const confirmReject = async () => {
   if (!rejectReason.value.trim()) return alert('请填写驳回原因')
@@ -371,6 +554,11 @@ const isProcessed = (s) => ['pending', 'rejected', 'finished'].includes(s)
 
 const openDetailModal = (post) => { currentPostDetail.value = post; showDetailModal.value = true }
 const closeDetailModal = () => { showDetailModal.value = false }
+const openTaskDetailModal = (task) => {
+  currentTaskDetail.value = task
+  showTaskDetailModal.value = true
+}
+const closeTaskDetailModal = () => { showTaskDetailModal.value = false }
 const openRejectModal = (id, type) => { rejectType.value = type; currentUser.value = id; rejectReason.value = ''; showRejectModal.value = true }
 const openPostRejectModal = (id) => openRejectModal(id, 'post')
 const closeModal = () => { showRejectModal.value = false }
@@ -404,6 +592,94 @@ onMounted(refreshData)
 .custom-table th { text-align: left; padding: 15px; color: #889891; border-bottom: 2px solid #f0f4f2; }
 .custom-table td { padding: 20px 15px; border-bottom: 1px solid #f0f4f2; font-size: 14px; }
 .excerpt { font-size: 12px; color: #94a3b8; margin-top: 4px; }
+.task-audit-block + .task-audit-block { margin-top: 28px; }
+.task-audit-title { margin: 0 0 10px; color: #1a4d38; font-size: 18px; }
+.empty-row { text-align: center; color: #94a3b8; padding: 26px 0; }
+.category-tag {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #ecfdf5;
+  color: #059669;
+  font-size: 12px;
+}
+.announcement-admin-panel {
+  margin-bottom: 24px;
+  border: 1px solid #e2ece7;
+  border-radius: 16px;
+  background: #f8faf9;
+  padding: 16px;
+}
+.panel-title {
+  margin: 0 0 10px;
+  color: #1a4d38;
+  font-size: 16px;
+}
+.announcement-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.announcement-input,
+.announcement-textarea {
+  border: 1px solid #d9e4de;
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 14px;
+  outline: none;
+}
+.announcement-textarea {
+  min-height: 90px;
+  resize: vertical;
+}
+.announcement-form-footer {
+  display: flex;
+  justify-content: flex-end;
+}
+.announcement-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.announcement-item {
+  background: white;
+  border: 1px solid #e2ece7;
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+.announcement-item-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+.announcement-time {
+  color: #94a3b8;
+  font-size: 12px;
+}
+.announcement-content {
+  margin: 0;
+  color: #4a5568;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+.announcement-item-footer {
+  margin-top: 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.announcement-author {
+  color: #94a3b8;
+  font-size: 12px;
+}
+.announcement-empty {
+  text-align: center;
+  color: #94a3b8;
+  padding: 8px 0;
+}
 
 /* 标签与按钮 */
 .status-pill, .role-badge { padding: 5px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; }
@@ -445,13 +721,6 @@ onMounted(refreshData)
   transition: all 0.3s ease;
 }
 
-/* --- 变体 A：帖子详情弹窗 (略宽) --- */
-.detail-view-card {
-  width: 90%;
-  max-width: 550px;
-  padding: 40px;
-}
-
 /* --- 变体 B：任务审批弹窗 (精简紧致) --- */
 .audit-view {
   width: 95%;
@@ -462,36 +731,6 @@ onMounted(refreshData)
 /* ============================================================
    3. 内容组件 (Components)
    ============================================================ */
-
-/* 标题与标签 */
-.type-badge {
-  display: inline-block;
-  background: #ecfdf5;
-  color: #10b981;
-  font-size: 11px;
-  padding: 2px 10px;
-  border-radius: 6px;
-  font-weight: 700;
-  margin-bottom: 8px;
-}
-
-.detail-title {
-  font-size: 26px;
-  color: #064e3b;
-  margin: 0;
-  line-height: 1.3;
-}
-
-/* 元信息 (作者/时间) */
-.detail-meta {
-  margin-top: 12px;
-  display: flex;
-  gap: 20px;
-  font-size: 13px;
-  color: #889891;
-  border-bottom: 1px solid #f0f4f2;
-  padding-bottom: 15px;
-}
 
 /* 文本展示区域 (任务描述等) */
 .data-row {
@@ -521,13 +760,6 @@ onMounted(refreshData)
   overflow-y: auto;
   padding: 10px 0;
 }
-.post-content-text {
-  font-size: 16px;
-  line-height: 1.8;
-  color: #374151;
-  white-space: pre-wrap;
-}
-
 /* ============================================================
    4. 表单与按钮 (Actions)
    ============================================================ */
@@ -540,24 +772,6 @@ onMounted(refreshData)
   font-size: 14px;
   outline-color: #10b981;
   margin: 10px 0;
-}
-
-.btn-close-styled {
-  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-  color: white;
-  border: none;
-  padding: 14px 70px;
-  border-radius: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  margin-top: 10px;
-  box-shadow: 0 8px 20px rgba(16, 185, 129, 0.3);
-  transition: all 0.3s ease;
-}
-
-.btn-close-styled:hover {
-  transform: translateY(-3px);
-  box-shadow: 0 12px 25px rgba(16, 185, 129, 0.4);
 }
 
 /* ============================================================
